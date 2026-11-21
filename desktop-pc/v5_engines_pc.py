@@ -686,7 +686,7 @@ class LargeDocIndexPC:
         )
         # Map candidate local indices to global page numbers
         sub_pages = [self.pages[i] for i in candidates]
-        raw_hits = ai_engine.ask_question(sub_pages, question, top_k=top_k)
+        raw_hits = ai_engine.ask_question(sub_pages, question)[:top_k]
         mapped: List[Tuple[int, int, str]] = []
         for sub_pg, rel, sent in raw_hits:
             local_i = candidates[sub_pg - 1]

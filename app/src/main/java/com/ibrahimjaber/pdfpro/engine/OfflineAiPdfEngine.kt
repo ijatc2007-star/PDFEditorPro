@@ -237,9 +237,8 @@ object OfflineAiPdfEngine {
         val arPct = ((arabicChars * 100f) / totalLetters).toInt().coerceIn(0, 100)
         val enPct = ((englishChars * 100f) / totalLetters).toInt().coerceIn(0, 100)
         val primaryLang = when {
-            arabicChars == 0 && englishChars == 0 -> DetectedLanguage.UNKNOWN
             arPct >= 65 -> DetectedLanguage.ARABIC
-            enPct >= 65 -> DetectedLanguage.ENGLISH
+            enPct >= 65 || (arabicChars == 0 && englishChars == 0) -> DetectedLanguage.ENGLISH
             else -> DetectedLanguage.BILINGUAL
         }
         val langStats = LanguageStats(

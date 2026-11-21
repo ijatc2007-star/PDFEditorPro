@@ -120,6 +120,7 @@ class NeuralTranslationManager(private val context: Context) {
                 enToAr.close()
             }
             onStatus?.invoke("Complete Arabic & English offline dictionary ready!")
+            Unit
         }
     }
 
@@ -132,6 +133,7 @@ class NeuralTranslationManager(private val context: Context) {
             val enModel = TranslateRemoteModel.Builder(TranslateLanguage.ENGLISH).build()
             runCatching { modelManager.deleteDownloadedModel(arModel).awaitTask() }
             runCatching { modelManager.deleteDownloadedModel(enModel).awaitTask() }
+            Unit
         }
     }
 
