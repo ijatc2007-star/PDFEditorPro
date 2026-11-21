@@ -34,12 +34,13 @@ jobs:
           gradle-version: 8.9
 
       - name: Decode Optional Play Store Upload Keystore
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 --decode > release-keystore.jks
-          echo "KEYSTORE_FILE=$PWD/release-keystore.jks" >> $GITHUB_ENV
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > release-keystore.jks
+            echo "KEYSTORE_FILE=$PWD/release-keystore.jks" >> "$GITHUB_ENV"
+          fi
 
       - name: Run Android Unit Tests
         run: gradle testDebugUnitTest
