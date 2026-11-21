@@ -10,3 +10,10 @@
 .cxx
 *.jks
 *.keystore
+
+# Python / Windows PC build artifacts
+__pycache__/
+*.py[cod]
+dist/
+*.spec
+.pytest_cache/
