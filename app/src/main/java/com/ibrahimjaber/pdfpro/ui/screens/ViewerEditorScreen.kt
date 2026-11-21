@@ -708,7 +708,7 @@ fun ViewerEditorScreen(
                             .associate { it.imagePath to BitmapFactory.decodeFile(it.imagePath) }
                     }
 
-                    BoxWithConstraints(
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(8.dp)
