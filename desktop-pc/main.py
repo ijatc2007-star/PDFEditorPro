@@ -19,6 +19,7 @@ from PIL import Image, ImageDraw, ImageOps, ImageTk
 import ai_engine_pc as ai_engine
 import pdf_engine_pc as engine
 import v4_engines_pc as v4
+import v5_engines_pc as v5
 from strings_pc import APP_NAME, APP_VERSION, CREDIT_AR, CREDIT_EN, STRINGS
 
 ctk.set_appearance_mode("Dark")
@@ -694,30 +695,54 @@ class PdfProStudioApp(ctk.CTk):
         self._ai_pages: List[str] = []
         self._ai_pdf_path: Optional[str] = None
         self._ai_last_report: Optional[Dict] = None
+        self._ai_large_index = None
+        self.translation_store = v5.LocalTranslationStore()
 
-        ctk.CTkLabel(frame, text="Offline AI PDF Studio (Arabic & English)", font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", padx=20, pady=(18, 2))
-        ctk.CTkLabel(frame, text=f"AI Summarizer • Ask Your PDF • PII Privacy Audit • Smart Outline • 100% Offline • {CREDIT_EN}", text_color="#38BDF8").pack(anchor="w", padx=20, pady=(0, 12))
+        ctk.CTkLabel(frame, text="Large-PDF AI Studio & Offline AR↔EN Dictionary (v5.0)", font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", padx=20, pady=(18, 2))
+        ctk.CTkLabel(frame, text=f"Map-Reduce Large-Book AI • Indexed 1,000+ Page Q&A • Downloadable AR↔EN Dictionary • {CREDIT_EN}", text_color="#38BDF8").pack(anchor="w", padx=20, pady=(0, 10))
 
         ctrl = ctk.CTkFrame(frame)
-        ctrl.pack(fill="x", padx=20, pady=6)
-        ctk.CTkButton(ctrl, text="Analyze Open PDF", fg_color="#7C3AED", command=lambda: self._run_ai_analysis(self.doc_path)).pack(side="left", padx=6, pady=10)
-        ctk.CTkButton(ctrl, text="Pick PDF...", width=92, command=self._pick_pdf_for_ai).pack(side="left", padx=4, pady=10)
-        ctk.CTkButton(ctrl, text="Translate EN↔AR", fg_color="#0284C7", command=self._ai_translate_pdf).pack(side="left", padx=4, pady=10)
-        ctk.CTkButton(ctrl, text="Flashcards", width=92, fg_color="#0D9488", command=self._ai_flashcards).pack(side="left", padx=4, pady=10)
-        ctk.CTkButton(ctrl, text="Draft Reply", width=92, fg_color="#D97706", command=self._ai_draft_reply).pack(side="left", padx=4, pady=10)
-        ctk.CTkButton(ctrl, text="GGUF Model", width=96, fg_color="#475569", command=self._ai_validate_gguf).pack(side="left", padx=4, pady=10)
-        ctk.CTkButton(ctrl, text="Save Summary PDF", fg_color="#059669", command=self._export_ai_summary_pdf).pack(side="right", padx=6, pady=10)
+        ctrl.pack(fill="x", padx=20, pady=4)
+        ctk.CTkButton(ctrl, text="Analyze Open PDF", fg_color="#7C3AED", command=lambda: self._run_ai_analysis(self.doc_path)).pack(side="left", padx=5, pady=8)
+        ctk.CTkButton(ctrl, text="Pick PDF...", width=88, command=self._pick_pdf_for_ai).pack(side="left", padx=4, pady=8)
+        ctk.CTkButton(ctrl, text="Translate EN↔AR", fg_color="#0284C7", command=self._ai_translate_pdf).pack(side="left", padx=4, pady=8)
+        ctk.CTkButton(ctrl, text="Download AR↔EN Dict", fg_color="#059669", command=self._ai_download_dictionary).pack(side="left", padx=4, pady=8)
+        ctk.CTkButton(ctrl, text="Saved Translations", width=124, fg_color="#0D9488", command=self._ai_show_saved_translations).pack(side="left", padx=4, pady=8)
+        ctk.CTkButton(ctrl, text="Save PDF", width=86, fg_color="#059669", command=self._export_ai_summary_pdf).pack(side="right", padx=6, pady=8)
+
+        # Row 2: Large-Book Page Range + Flashcards + Reply + GGUF
+        ctrl2 = ctk.CTkFrame(frame)
+        ctrl2.pack(fill="x", padx=20, pady=4)
+        ctk.CTkLabel(ctrl2, text="Large PDF Range (Pages):").pack(side="left", padx=(8, 4), pady=8)
+        self.ai_range_start = ctk.CTkEntry(ctrl2, width=56, placeholder_text="1")
+        self.ai_range_start.insert(0, "1")
+        self.ai_range_start.pack(side="left", padx=2, pady=8)
+        ctk.CTkLabel(ctrl2, text="to").pack(side="left", padx=2)
+        self.ai_range_end = ctk.CTkEntry(ctrl2, width=64, placeholder_text="All")
+        self.ai_range_end.pack(side="left", padx=(2, 10), pady=8)
+        ctk.CTkButton(ctrl2, text="Flashcards", width=90, fg_color="#0D9488", command=self._ai_flashcards).pack(side="left", padx=4, pady=8)
+        ctk.CTkButton(ctrl2, text="Draft Reply", width=90, fg_color="#D97706", command=self._ai_draft_reply).pack(side="left", padx=4, pady=8)
+        ctk.CTkButton(ctrl2, text="GGUF Model", width=94, fg_color="#475569", command=self._ai_validate_gguf).pack(side="left", padx=4, pady=8)
+        ctk.CTkButton(ctrl2, text="Photo Translate", width=116, fg_color="#0284C7", command=self._tool_photo_translate).pack(side="right", padx=6, pady=8)
 
         # Ask Your PDF Bar
         qa_bar = ctk.CTkFrame(frame)
-        qa_bar.pack(fill="x", padx=20, pady=6)
-        self.ai_question_entry = ctk.CTkEntry(qa_bar, placeholder_text="Ask anything about this PDF in English or Arabic (اسأل أي سؤال عن الملف)...")
+        qa_bar.pack(fill="x", padx=20, pady=4)
+        self.ai_question_entry = ctk.CTkEntry(qa_bar, placeholder_text="Ask anything across 1,000+ pages in English or Arabic (اسأل أي سؤال عن الملف)...")
         self.ai_question_entry.pack(side="left", fill="x", expand=True, padx=8, pady=10)
         ctk.CTkButton(qa_bar, text="Ask AI", width=96, fg_color="#0284C7", command=self._ask_ai_question).pack(side="right", padx=8, pady=10)
 
-        self.ai_output_box = ctk.CTkTextbox(frame, height=480, font=ctk.CTkFont(size=13))
+        self.ai_output_box = ctk.CTkTextbox(frame, height=460, font=ctk.CTkFont(size=13))
         self.ai_output_box.pack(fill="both", expand=True, padx=20, pady=(6, 16))
-        self.ai_output_box.insert("1.0", "Click 'Analyze Currently Open PDF' to run 100% offline AI Summarization, Arabic/English Analytics, Entity & Action Extraction, PII Redaction Audit, and Smart Outline.\n")
+        d_cnt = self.translation_store.get_dictionary_count()
+        c_cnt = self.translation_store.get_cache_count()
+        self.ai_output_box.insert(
+            "1.0",
+            f"PDF Editor Pro v5.0 AI Studio Ready!\n"
+            f"• Local Offline Dictionary: {d_cnt} English ↔ Arabic entries | Cached Translations: {c_cnt}\n"
+            f"• Supports Large Multi-Hundred-Page Books via Map-Reduce Summarizer & Inverted-Index BM25 Q&A.\n"
+            f"• Click 'Download AR↔EN Dict' to download the complete online English–Arabic dictionary pack locally.\n",
+        )
 
     def _pick_pdf_for_ai(self):
         p = filedialog.askopenfilename(filetypes=[("PDF Files", "*.pdf")])
@@ -729,21 +754,41 @@ class PdfProStudioApp(ctk.CTk):
             messagebox.showinfo("AI Studio", "Please open or select a PDF file first.")
             return
         try:
-            pages = ai_engine.extract_pages_text(pdf_path, self.doc_password if pdf_path == self.doc_path else None)
-            rep = ai_engine.analyze_document(pages, num_sentences=5)
+            st_raw = self.ai_range_start.get().strip()
+            en_raw = self.ai_range_end.get().strip()
+            start_p = int(st_raw) if st_raw.isdigit() else 1
+            end_p = int(en_raw) if en_raw.isdigit() else None
+
+            self.status_var.set(f"Extracting & analyzing {Path(pdf_path).name}...")
+            self.update_idletasks()
+            pages, s_p, e_p, total_p = v5.extract_pages_range_pc(
+                pdf_path,
+                start_page=start_p,
+                end_page=end_p,
+                password=self.doc_password if pdf_path == self.doc_path else None,
+            )
+            rep = v5.analyze_large_document_pc(pages, start_page_1based=s_p, total_doc_pages=total_p, num_sentences=8)
             self._ai_pages = pages
             self._ai_pdf_path = pdf_path
             self._ai_last_report = rep
+            self._ai_large_index = v5.LargeDocIndexPC(pages, start_page_1based=s_p)
 
             lang = rep["language"]
+            mr_tag = " | ⚡ Map-Reduce Large-Book Mode" if rep.get("used_map_reduce") else ""
             lines = [
-                f"=== AI ANALYSIS: {Path(pdf_path).name} ===",
+                f"=== AI ANALYSIS: {Path(pdf_path).name} (Pages {s_p}–{e_p} of {total_p}){mr_tag} ===",
                 f"Language: {lang['primary']} (AR {lang['arabic_pct']}% / EN {lang['english_pct']}%) | Words: {lang['words']} | ~{lang['read_minutes']} min read",
                 "",
                 "--- AI EXECUTIVE SUMMARY ---",
             ]
             for i, b in enumerate(rep["summary"], start=1):
                 lines.append(f"{i}. {b}")
+            if rep.get("chapter_summaries"):
+                lines.append(f"\n--- CHAPTER / SECTION BREAKDOWN ({len(rep['chapter_summaries'])} sections) ---")
+                for ch in rep["chapter_summaries"]:
+                    lines.append(f"  [Pages {ch['start_page']}–{ch['end_page']}] {ch['headline']}")
+                    for b in ch["bullets"]:
+                        lines.append(f"    • {b}")
             if rep["keywords"]:
                 lines.append("\nTop Topics: " + ", ".join(rep["keywords"]))
             if rep["pii"]:
@@ -768,7 +813,7 @@ class PdfProStudioApp(ctk.CTk):
 
             self.ai_output_box.delete("1.0", "end")
             self.ai_output_box.insert("1.0", "\n".join(lines))
-            self.status_var.set(f"AI Analysis complete for {Path(pdf_path).name} — 100% Offline")
+            self.status_var.set(f"AI Analysis complete: {len(pages)}/{total_p} pages indexed — 100% Offline")
         except Exception as exc:
             messagebox.showerror("AI Studio Error", str(exc))
 
@@ -781,7 +826,7 @@ class PdfProStudioApp(ctk.CTk):
         if not self._ai_pages:
             messagebox.showinfo("Ask AI", "Select or open a PDF first.")
             return
-        hits = ai_engine.ask_question(self._ai_pages, q)
+        hits = self._ai_large_index.ask(q) if self._ai_large_index else ai_engine.ask_question(self._ai_pages, q)
         out_lines = [f"\n\n=== Q: {q} ==="]
         if not hits:
             out_lines.append("No direct matching passage found. Try different keywords.")
@@ -792,17 +837,47 @@ class PdfProStudioApp(ctk.CTk):
         self.ai_question_entry.delete(0, "end")
 
     def _export_ai_summary_pdf(self):
-        if not self._ai_last_report or not self._ai_pdf_path:
-            messagebox.showinfo("Export Summary", "Run AI Analysis on a PDF first.")
+        if not self._ai_pdf_path and not self.ai_output_box.get("1.0", "end").strip():
+            messagebox.showinfo("Export Summary", "Run AI Analysis or Translation first.")
             return
-        out = filedialog.asksaveasfilename(defaultextension=".pdf", initialfile=f"{Path(self._ai_pdf_path).stem}_AI_Summary.pdf")
+        stem = Path(self._ai_pdf_path).stem if self._ai_pdf_path else "AI_Output"
+        out = filedialog.asksaveasfilename(defaultextension=".pdf", initialfile=f"{stem}_AI_Output.pdf")
         if not out:
             return
         text = self.ai_output_box.get("1.0", "end").strip()
-        engine._render_lines_to_pdf(f"AI Summary — {Path(self._ai_pdf_path).stem}", text.splitlines(), out)
+        engine._render_lines_to_pdf(f"AI Studio — {stem}", text.splitlines(), out)
         self._open_pdf_path(out)
         self._show_tab("viewer")
-        messagebox.showinfo("Saved", f"Saved AI Summary PDF:\n{out}")
+        messagebox.showinfo("Saved", f"Saved PDF:\n{out}")
+
+    def _ai_download_dictionary(self):
+        self.status_var.set("Downloading complete English ↔ Arabic dictionary pack into local SQLite database...")
+        self.update_idletasks()
+        try:
+            res = self.translation_store.download_complete_dictionary_pack(
+                progress_cb=lambda msg: (self.status_var.set(msg), self.update_idletasks())
+            )
+            messagebox.showinfo(
+                "Offline AR ↔ EN Dictionary Ready",
+                f"Local SQLite Dictionary Updated!\n\nTotal Entries: {res['total_entries']}\nSource: {res['source']}\nDatabase: {self.translation_store.db_path}\n\nAll future translations are saved locally for 100% offline access.",
+            )
+            self.status_var.set(f"Offline AR↔EN Dictionary Ready ({res['total_entries']} entries).")
+        except Exception as exc:
+            messagebox.showerror("Dictionary Download Error", str(exc))
+
+    def _ai_show_saved_translations(self):
+        recs = self.translation_store.list_saved_history(limit=30)
+        if not recs:
+            messagebox.showinfo("Saved Translations", "No saved local translations yet. Translate any PDF or photo first!")
+            return
+        lines = [f"=== SAVED LOCAL TRANSLATIONS ({len(recs)} records — 100% Offline SQLite) ===", ""]
+        for r in recs:
+            lines.append(f"[{r['source_label']} • {r['direction'].upper()} • {r['engine_used']}]")
+            lines.append(r["translated_text"][:500])
+            lines.append("-" * 60)
+        self.ai_output_box.delete("1.0", "end")
+        self.ai_output_box.insert("1.0", "\n".join(lines))
+        self.status_var.set(f"Loaded {len(recs)} saved local translations.")
 
     def _ai_translate_pdf(self):
         if not self._ai_pages and self.doc_path:
@@ -817,12 +892,22 @@ class PdfProStudioApp(ctk.CTk):
         )
         if not direction:
             return
-        src_text = "\n\n".join(self._ai_pages)
-        translated = v4.translate_offline(src_text, direction=direction.strip().lower())
-        header = f"=== OFFLINE BILINGUAL TRANSLATION ({direction.upper()}) — {Path(self._ai_pdf_path or 'Document').name} ===\n\n"
+        allow_online = messagebox.askyesno(
+            "Translation Engine Mode",
+            "Use internet once (if connected) for full-sentence translation and save permanently to local offline cache?\n\nYes = Full-Sentence Sync → Save Locally Forever\nNo = 100% Offline Local Downloaded Dictionary Only",
+        )
+        src_text = "\n\n".join(self._ai_pages)[:25000]
+        res = self.translation_store.translate_smart(
+            src_text,
+            direction=direction.strip().lower(),
+            source_label=Path(self._ai_pdf_path or "Document.pdf").name,
+            allow_online_sync=allow_online,
+            save_history=True,
+        )
+        header = f"=== BILINGUAL TRANSLATION ({res['direction'].upper()}) — {res['engine']} ===\n\n"
         self.ai_output_box.delete("1.0", "end")
-        self.ai_output_box.insert("1.0", header + translated)
-        self.status_var.set("Offline EN↔AR translation complete — click 'Save Summary PDF' to export as PDF.")
+        self.ai_output_box.insert("1.0", header + res["translated"])
+        self.status_var.set(f"Translation saved locally ({res['engine']}). Click 'Save PDF' to export.")
 
     def _ai_flashcards(self):
         if not self._ai_pages and self.doc_path:
@@ -1033,14 +1118,14 @@ class PdfProStudioApp(ctk.CTk):
             messagebox.showerror("Error", str(exc))
 
     # =========================================================================
-    # TAB 3: 20 PRO OFFLINE PDF TOOLS (v4.0)
+    # TAB 3: 22 PRO OFFLINE PDF TOOLS (v5.0)
     # =========================================================================
 
     def _build_tools_tab(self):
         frame = ctk.CTkScrollableFrame(self.main_area, corner_radius=0)
         self.tabs["tools"] = frame
 
-        ctk.CTkLabel(frame, text="20 Commercial-Grade Offline Pro PDF Tools (v4.0)", font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", padx=20, pady=(18, 2))
+        ctk.CTkLabel(frame, text="22 Commercial-Grade Offline Pro PDF Tools (v5.0)", font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", padx=20, pady=(18, 2))
         ctk.CTkLabel(frame, text=f"{CREDIT_EN}  |  {CREDIT_AR}", text_color="#38BDF8").pack(anchor="w", padx=20, pady=(0, 14))
 
         grid = ctk.CTkFrame(frame, fg_color="transparent")
@@ -1049,11 +1134,13 @@ class PdfProStudioApp(ctk.CTk):
             grid.grid_columnconfigure(c, weight=1)
 
         tools = [
+            ("CamScanner Pro", "Magic Color, B&W, No Shadow → OCR PDF", "#059669", self._tool_camscanner),
+            ("Photo / Screen Translate", "OCR photo → Offline AR↔EN + Cache", "#0D9488", self._tool_photo_translate),
             ("Offline AR+EN OCR", "Scanned PDF → Searchable PDF", "#0D9488", self._tool_ocr),
             ("Interactive Form Filler", "Fill & flatten AcroForms", "#7C3AED", self._tool_form_filler),
             ("X.509 Digital Signer", "RSA-2048 PKCS#12 SHA-256", "#059669", self._tool_digital_sign),
             ("Switch Open PDF Tab", "Multi-tab document switcher", "#0284C7", self._tool_switch_tab),
-            ("AI Studio & Translator", "EN↔AR, Q&A, Flashcards, GGUF", "#7C3AED", lambda: self._show_tab("ai")),
+            ("AI Studio & Dictionary", "Large Books, AR↔EN Pack, Q&A", "#7C3AED", lambda: self._show_tab("ai")),
             ("Merge PDFs", "Combine multiple PDFs", "#DC2626", self._tool_merge),
             ("Split PDF", "Extract ranges or single pages", "#0284C7", self._tool_split),
             ("Rotate / Reorder Pages", "Rotate 90° or reorder pages", "#7C3AED", self._tool_rotate),
@@ -1496,6 +1583,88 @@ class PdfProStudioApp(ctk.CTk):
                 command=lambda p=tab_path: (win.destroy(), self._open_pdf_path(p), self._show_tab("viewer")),
             ).pack(fill="x", pady=4, padx=4)
 
+    def _tool_camscanner(self):
+        imgs = filedialog.askopenfilenames(
+            title="CamScanner Pro — Select Scanned Document Photos",
+            filetypes=[("Images", "*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff")],
+        )
+        if not imgs:
+            return
+        flt = simpledialog.askstring(
+            "CamScanner Pro Filter",
+            "Choose filter (magic_color, crisp_bw, shadow_remove, grayscale, original):",
+            initialvalue="magic_color",
+        )
+        if not flt:
+            return
+        auto_crop = messagebox.askyesno("CamScanner Auto-Crop", "Automatically detect paper edges and crop dark margins?")
+        run_ocr = messagebox.askyesno("Searchable OCR Layer", "Embed offline Arabic + English Tesseract OCR text layer into the PDF?")
+        out = filedialog.asksaveasfilename(
+            title="Save CamScanner Pro PDF",
+            defaultextension=".pdf",
+            initialfile="CamScan_Pro_2026.pdf",
+            filetypes=[("PDF Files", "*.pdf")],
+        )
+        if not out:
+            return
+        try:
+            self.status_var.set(f"CamScanner Pro enhancing {len(imgs)} page(s) with {flt}...")
+            self.update_idletasks()
+            saved, ocr_pages = v5.camscan_batch_to_pdf(
+                list(imgs),
+                out,
+                filter_mode=flt.strip().lower(),
+                auto_crop=auto_crop,
+                run_ocr=run_ocr,
+                ocr_lang="ara+eng",
+            )
+            self._open_pdf_path(saved)
+            self._show_tab("viewer")
+            chars = sum(len(p) for p in ocr_pages)
+            messagebox.showinfo(
+                "CamScanner Pro Complete",
+                f"Enhanced {len(imgs)} page(s) using '{flt}' and saved PDF:\n{saved}"
+                + (f"\n\nEmbedded Offline OCR: {chars} chars recognized." if run_ocr else ""),
+            )
+        except Exception as exc:
+            messagebox.showerror("CamScanner Error", str(exc))
+
+    def _tool_photo_translate(self):
+        img_path = filedialog.askopenfilename(
+            title="Select Photo / Screenshot for Instant Offline OCR & AR↔EN Translation",
+            filetypes=[("Images", "*.png *.jpg *.jpeg *.webp *.bmp")],
+        )
+        if not img_path:
+            return
+        direction = simpledialog.askstring(
+            "Photo Instant Translator (EN ↔ AR)",
+            "Enter translation direction (auto, en_to_ar, or ar_to_en):",
+            initialvalue="auto",
+        )
+        if not direction:
+            return
+        try:
+            self.status_var.set("Running offline AR+EN OCR & translating photo...")
+            self.update_idletasks()
+            res = v5.instant_image_translate_pc(
+                img_path,
+                store=self.translation_store,
+                ocr_lang="ara+eng",
+                direction=direction.strip().lower(),
+                allow_online_sync=False,
+            )
+            self._show_tab("ai")
+            self.ai_output_box.delete("1.0", "end")
+            self.ai_output_box.insert(
+                "1.0",
+                f"=== INSTANT PHOTO TRANSLATION ({Path(img_path).name}) — {res['engine']} ===\n\n"
+                f"--- DETECTED TEXT (OFFLINE OCR) ---\n{res['original']}\n\n"
+                f"--- TRANSLATION (SAVED LOCALLY) ---\n{res['translated']}\n",
+            )
+            self.status_var.set("Instant photo translation complete and saved locally.")
+        except Exception as exc:
+            messagebox.showerror("Photo Translate Error", str(exc))
+
     # =========================================================================
     # TAB 4: SETTINGS & ABOUT (IBRAHIM JABER 2026)
     # =========================================================================
@@ -1513,12 +1682,12 @@ class PdfProStudioApp(ctk.CTk):
         ctk.CTkLabel(
             card,
             text=(
-                "• 100% Offline Standalone Windows PC (.exe) + Android (.apk / Play Store .aab) Suite\n"
-                "• Pillar 1: Offline Arabic + English Scanned-PDF OCR (Tesseract 5 LSTM → Searchable PDF)\n"
-                "• Pillar 2: Offline AI Studio — EN↔AR Translation, Q&A, Study Flashcards, Executive Reply & Local GGUF Inspector\n"
-                "• Pillar 3: Interactive Native PDF AcroForm Filler, Flattener & Sample Form Generator\n"
-                "• Pillar 4: Continuous Vertical Book Scroll + Multi-Tab Document Switcher & Full RTL Arabic/English UI\n"
-                "• Pillar 5: Cryptographic X.509 RSA-2048 PKCS#12 Digital Signatures + Universal Format Converter + 20 Pro Tools"
+                "• Standalone Windows PC (.exe) + Android (.apk / Play Store .aab) Suite — v5.0.0\n"
+                "• Downloadable Complete English ↔ Arabic Dictionary Pack + Persistent Local SQLite Translation Memory\n"
+                "• CamScanner Pro: Auto-Border Crop, Magic Color, Crisp B&W, Shadow Removal & Multi-Page OCR PDF\n"
+                "• Instant Photo / Camera Translator: Offline AR+EN Tesseract OCR + Downloaded Bilingual Dictionary\n"
+                "• Large-Book AI Studio: Map-Reduce Summarizer + Page-Range Selector + Inverted-Index Q&A (1,000+ Pages)\n"
+                "• Interactive AcroForms, Continuous Vertical Scroll, Multi-Tab Viewer, X.509 RSA-2048 Signatures & 22 Pro Tools"
             ),
             justify="left",
             font=ctk.CTkFont(size=13),

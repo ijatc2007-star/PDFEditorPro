@@ -15,6 +15,11 @@
 -keep class org.bouncycastle.operator.** { *; }
 -keep class org.bouncycastle.asn1.** { *; }
 
+# Keep ML Kit On-Device Translation & CameraX classes for release AAB
+-keep class com.google.mlkit.** { *; }
+-keep class androidx.camera.** { *; }
+
 -dontwarn org.bouncycastle.**
 -dontwarn com.tom_roush.pdfbox.**
 -dontwarn com.googlecode.tesseract.**
+-dontwarn com.google.mlkit.**

@@ -32,21 +32,25 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -54,7 +58,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -62,6 +65,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -87,9 +91,11 @@ import com.ibrahimjaber.pdfpro.data.PdfDocumentItem
 import com.ibrahimjaber.pdfpro.engine.AiDocumentReport
 import com.ibrahimjaber.pdfpro.engine.AiQaResponse
 import com.ibrahimjaber.pdfpro.engine.FileHelper
+import com.ibrahimjaber.pdfpro.engine.LargeDocIndex
 import com.ibrahimjaber.pdfpro.engine.LocalGgufModelInfo
 import com.ibrahimjaber.pdfpro.engine.OfflineAiPdfEngine
 import com.ibrahimjaber.pdfpro.engine.OfflineTranslatorEngine
+import com.ibrahimjaber.pdfpro.engine.SavedTranslationRecord
 import com.ibrahimjaber.pdfpro.engine.SummaryDepth
 import com.ibrahimjaber.pdfpro.engine.TranslationDirection
 import com.ibrahimjaber.pdfpro.ui.theme.BrandBlue
@@ -97,7 +103,12 @@ import com.ibrahimjaber.pdfpro.ui.theme.BrandCrimson
 import com.ibrahimjaber.pdfpro.ui.theme.BrandEmerald
 import com.ibrahimjaber.pdfpro.ui.theme.BrandNavy
 import com.ibrahimjaber.pdfpro.ui.theme.BrandPurple
+import com.ibrahimjaber.pdfpro.ui.theme.BrandTeal
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -120,23 +131,46 @@ fun AiAssistantScreen(
         )
     }
     var showLibraryPicker by remember { mutableStateOf(false) }
-    var activeTab by remember { mutableIntStateOf(0) } // 0=Summary, 1=Ask PDF, 2=Insights & PII, 3=Auto Outline
+    var activeTab by remember { mutableIntStateOf(0) } // 0=Summary, 1=Translate & Dict, 2=Ask PDF, 3=Insights & PII, 4=Auto Outline
     var summaryDepth by remember { mutableStateOf(SummaryDepth.MEDIUM) }
 
+    // Large-PDF Streaming & Page-Range State
+    var totalDocPages by remember { mutableIntStateOf(0) }
+    var rangeStartInput by remember { mutableStateOf("1") }
+    var rangeEndInput by remember { mutableStateOf("") }
+    var appliedRangeStart by remember { mutableIntStateOf(1) }
+    var appliedRangeEnd by remember { mutableStateOf<Int?>(null) }
+
     var pagesText by remember { mutableStateOf<List<String>>(emptyList()) }
+    var largeDocIndex by remember { mutableStateOf<LargeDocIndex?>(null) }
     var report by remember { mutableStateOf<AiDocumentReport?>(null) }
     var isAnalyzing by remember { mutableStateOf(false) }
+    var analysisProgress by remember { mutableFloatStateOf(0f) }
+    var analysisStageText by remember { mutableStateOf("") }
+    var activeAnalysisJob by remember { mutableStateOf<Job?>(null) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
     // Chat Q&A state
     var questionInput by remember { mutableStateOf("") }
     val qaHistory = remember { mutableStateListOf<AiQaResponse>() }
 
-    // Translate & On-Device GenAI state
+    // Downloadable Offline Neural Dictionary & Saved Translations state
+    var neuralPackReady by remember { mutableStateOf(false) }
+    var isDownloadingPack by remember { mutableStateOf(false) }
+    var packDownloadMsg by remember { mutableStateOf("") }
+    var isTranslating by remember { mutableStateOf(false) }
+    var translateProgress by remember { mutableFloatStateOf(0f) }
+    var translateEngineLabel by remember { mutableStateOf("") }
     var translateDir by remember { mutableStateOf(TranslationDirection.AUTO) }
     var translatedPreview by remember { mutableStateOf("") }
+    var savedTranslations by remember { mutableStateOf<List<SavedTranslationRecord>>(emptyList()) }
     var generatedReply by remember { mutableStateOf("") }
     var ggufInfo by remember { mutableStateOf<LocalGgufModelInfo?>(null) }
+
+    LaunchedEffect(Unit) {
+        neuralPackReady = app.translationManager.areOfflineModelsReady()
+        savedTranslations = app.translationManager.loadSavedTranslations()
+    }
 
     val pickGgufLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -168,26 +202,81 @@ fun AiAssistantScreen(
                             isEncrypted = info.isEncrypted
                         )
                     )
+                    appliedRangeStart = 1
+                    appliedRangeEnd = null
+                    rangeStartInput = "1"
+                    rangeEndInput = ""
                     selectedFile = imported
                 }
             }
         }
     }
 
-    LaunchedEffect(selectedFile?.absolutePath, summaryDepth) {
+    // Streaming Large-Document Analyzer (supports 500–2,000+ pages smoothly with live progress & Cancel)
+    LaunchedEffect(selectedFile?.absolutePath, summaryDepth, appliedRangeStart, appliedRangeEnd) {
         val file = selectedFile ?: return@LaunchedEffect
         if (!file.exists()) return@LaunchedEffect
-        isAnalyzing = true
-        errorMsg = null
-        runCatching {
-            val extracted = OfflineAiPdfEngine.extractNormalizedPages(file)
-            pagesText = extracted
-            report = OfflineAiPdfEngine.analyzeDocument(extracted, summaryDepth)
-            qaHistory.clear()
-        }.onFailure { err ->
-            errorMsg = err.message ?: "Unable to analyze PDF"
+
+        activeAnalysisJob?.cancel()
+        val job = launch {
+            isAnalyzing = true
+            analysisProgress = 0.02f
+            analysisStageText = if (s.isArabic) "جاري فحص عدد صفحات الملف..." else "Inspecting PDF page count..."
+            errorMsg = null
+
+            try {
+                val docPages = OfflineAiPdfEngine.inspectPageCount(file)
+                totalDocPages = docPages
+                if (rangeEndInput.isBlank()) {
+                    rangeEndInput = docPages.toString()
+                }
+                val effEnd = appliedRangeEnd ?: docPages
+
+                val batch = OfflineAiPdfEngine.extractPagesStreaming(
+                    pdfFile = file,
+                    startPage = appliedRangeStart,
+                    endPage = effEnd,
+                    onProgress = { cur, tot ->
+                        analysisProgress = 0.05f + 0.60f * (cur.toFloat() / tot.coerceAtLeast(1))
+                        analysisStageText = if (s.isArabic) {
+                            "قراءة الصفحة $cur من $tot (إجمالي الملف $docPages صفحة)..."
+                        } else {
+                            "Extracting page $cur / $tot (Book total: $docPages pages)..."
+                        }
+                    }
+                )
+                pagesText = batch.pages
+
+                analysisStageText = if (s.isArabic) "بناء الفهرس السريع للبحث والأسئلة..." else "Building fast inverted search index..."
+                analysisProgress = 0.70f
+                val idx = withContext(Dispatchers.Default) {
+                    OfflineAiPdfEngine.buildLargeDocIndex(batch.pages, startPageNumber = batch.startPageNumber)
+                }
+                largeDocIndex = idx
+
+                val rep = withContext(Dispatchers.Default) {
+                    OfflineAiPdfEngine.analyzeLargeDocument(
+                        pages = batch.pages,
+                        startPageNumber = batch.startPageNumber,
+                        totalDocumentPages = batch.totalDocumentPages,
+                        depth = summaryDepth,
+                        onStageProgress = { stage, frac ->
+                            analysisProgress = 0.70f + 0.30f * frac
+                            analysisStageText = stage
+                        }
+                    )
+                }
+                report = rep
+                qaHistory.clear()
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (err: Throwable) {
+                errorMsg = err.message ?: "Unable to analyze PDF"
+            } finally {
+                isAnalyzing = false
+            }
         }
-        isAnalyzing = false
+        activeAnalysisJob = job
     }
 
     Scaffold(
@@ -201,7 +290,7 @@ fun AiAssistantScreen(
                     },
                     title = {
                         Column {
-                            Text(if (s.isArabic) "الذكاء الاصطناعي للملفات (أوفلاين)" else "Offline AI PDF Studio")
+                            Text(if (s.isArabic) "استوديو الذكاء الاصطناعي للملفات الكبيرة" else "Large-PDF AI Studio (v5.0)")
                             selectedFile?.let {
                                 Text(it.name, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
@@ -235,17 +324,17 @@ fun AiAssistantScreen(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFFFDE047))
                             Text(
-                                text = if (s.isArabic) "الذكاء الاصطناعي لـ PDF — عربي وإنجليزي" else "Offline AI PDF Assistant (EN & AR)",
+                                text = if (s.isArabic) "استوديو AI للملفات الكبيرة + القاموس العصبي" else "Large-PDF AI Studio + Neural Translator",
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp
+                                fontSize = 16.5.sp
                             )
                         }
                         Text(
                             text = if (s.isArabic) {
-                                "تلخيص ذكي • اسأل الملف • كشف البيانات الحساسة (PII) • فهرسة تلقائية — 100% بدون إنترنت • ${AppBranding.CREDIT_LINE_AR}"
+                                "تلخيص الكتب الكبيرة (Map-Reduce) • بحث فوري عبر 1000+ صفحة • قاموس عربي/إنجليزي كامل أوفلاين • ${AppBranding.CREDIT_LINE_AR}"
                             } else {
-                                "AI Summarizer • Ask Your PDF • PII Privacy Audit • Smart Outline — 100% On-Device Offline • ${AppBranding.CREDIT_LINE}"
+                                "Map-Reduce Large-Book Summarizer • Instant 1,000+ Page Q&A • Downloadable Offline AR↔EN Neural Pack • ${AppBranding.CREDIT_LINE}"
                             },
                             color = Color(0xFFE0F2FE),
                             fontSize = 12.sp
@@ -273,7 +362,7 @@ fun AiAssistantScreen(
                         }
                         selectedFile?.let {
                             Text(
-                                text = "✓ ${it.name}",
+                                text = "✓ ${it.name}" + if (totalDocPages > 0) "  ($totalDocPages ${if (s.isArabic) "صفحة" else "pages"})" else "",
                                 color = Color(0xFF86EFAC),
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 12.5.sp,
@@ -285,11 +374,82 @@ fun AiAssistantScreen(
                 }
             }
 
+            // Large-Document Page Range Selector (always available when PDF has > 15 pages)
+            if (totalDocPages > 15 && selectedFile != null) {
+                item {
+                    Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = if (s.isArabic) "⚡ وضع الملفات الكبيرة ($totalDocPages صفحة) — اختر النطاق:" else "⚡ Large-PDF Mode ($totalDocPages pages) — Select Page Range:",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.5.sp,
+                                color = BrandPurple
+                            )
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                AssistChip(
+                                    onClick = {
+                                        appliedRangeStart = 1
+                                        appliedRangeEnd = null
+                                        rangeStartInput = "1"
+                                        rangeEndInput = totalDocPages.toString()
+                                    },
+                                    label = { Text(if (s.isArabic) "الكتاب كامل (1–$totalDocPages)" else "Full Book (1–$totalDocPages)", fontSize = 11.sp) }
+                                )
+                                AssistChip(
+                                    onClick = {
+                                        appliedRangeStart = 1
+                                        appliedRangeEnd = minOf(50, totalDocPages)
+                                        rangeStartInput = "1"
+                                        rangeEndInput = minOf(50, totalDocPages).toString()
+                                    },
+                                    label = { Text("1–${minOf(50, totalDocPages)}", fontSize = 11.sp) }
+                                )
+                                if (totalDocPages > 50) {
+                                    AssistChip(
+                                        onClick = {
+                                            appliedRangeStart = 51
+                                            appliedRangeEnd = minOf(120, totalDocPages)
+                                            rangeStartInput = "51"
+                                            rangeEndInput = minOf(120, totalDocPages).toString()
+                                        },
+                                        label = { Text("51–${minOf(120, totalDocPages)}", fontSize = 11.sp) }
+                                    )
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = rangeStartInput,
+                                    onValueChange = { rangeStartInput = it.filter(Char::isDigit) },
+                                    label = { Text(if (s.isArabic) "من صفحة" else "From", fontSize = 11.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = rangeEndInput,
+                                    onValueChange = { rangeEndInput = it.filter(Char::isDigit) },
+                                    label = { Text(if (s.isArabic) "إلى صفحة" else "To", fontSize = 11.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Button(onClick = {
+                                    val st = rangeStartInput.toIntOrNull()?.coerceIn(1, totalDocPages) ?: 1
+                                    val en = rangeEndInput.toIntOrNull()?.coerceIn(st, totalDocPages) ?: totalDocPages
+                                    appliedRangeStart = st
+                                    appliedRangeEnd = en
+                                }) {
+                                    Text(if (s.isArabic) "تحليل" else "Analyze", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // 5 AI Mode Tabs
             item {
                 ScrollableTabRow(selectedTabIndex = activeTab, edgePadding = 4.dp) {
                     Tab(selected = activeTab == 0, onClick = { activeTab = 0 }, text = { Text(if (s.isArabic) "ملخص AI" else "Summary", fontSize = 12.sp) })
-                    Tab(selected = activeTab == 1, onClick = { activeTab = 1 }, text = { Text(if (s.isArabic) "ترجمة EN↔AR" else "Translate", fontSize = 12.sp) })
+                    Tab(selected = activeTab == 1, onClick = { activeTab = 1 }, text = { Text(if (s.isArabic) "القاموس والترجمة" else "Translate & Dict", fontSize = 12.sp) })
                     Tab(selected = activeTab == 2, onClick = { activeTab = 2 }, text = { Text(if (s.isArabic) "اسأل الملف" else "Ask PDF", fontSize = 12.sp) })
                     Tab(selected = activeTab == 3, onClick = { activeTab = 3 }, text = { Text(if (s.isArabic) "بيانات/PII" else "Insights", fontSize = 12.sp) })
                     Tab(selected = activeTab == 4, onClick = { activeTab = 4 }, text = { Text(if (s.isArabic) "فهرس ذكي" else "Outline", fontSize = 12.sp) })
@@ -298,11 +458,25 @@ fun AiAssistantScreen(
 
             if (isAnalyzing) {
                 item {
-                    Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator()
-                            Spacer(Modifier.height(10.dp))
-                            Text(if (s.isArabic) "جاري التحليل الذكي أوفلاين..." else "Analyzing PDF on-device offline...")
+                    Card(shape = RoundedCornerShape(16.dp)) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = analysisStageText.ifBlank { if (s.isArabic) "جاري التحليل الذكي أوفلاين..." else "Analyzing PDF on-device..." },
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.5.sp
+                            )
+                            LinearProgressIndicator(
+                                progress = { analysisProgress.coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Text("${(analysisProgress * 100).toInt()}%", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            OutlinedButton(onClick = { activeAnalysisJob?.cancel(); isAnalyzing = false }) {
+                                Text(s.cancel)
+                            }
                         }
                     }
                 }
@@ -317,13 +491,13 @@ fun AiAssistantScreen(
                 val file = selectedFile!!
 
                 when (activeTab) {
-                    // TAB 0: AI SUMMARY & DOCUMENT ANALYTICS
+                    // TAB 0: AI SUMMARY & LARGE-BOOK CHAPTER BREAKDOWN
                     0 -> {
                         item {
                             Card(shape = RoundedCornerShape(16.dp)) {
                                 Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text(
-                                        text = if (s.isArabic) "تحليل اللغة والقراءة" else "Document Language & Reading Analytics",
+                                        text = if (s.isArabic) "تحليل اللغة وحجم الملف" else "Document Language & Large-Book Analytics",
                                         style = MaterialTheme.typography.titleMedium
                                     )
                                     val ls = rep.languageStats
@@ -332,12 +506,20 @@ fun AiAssistantScreen(
                                         fontSize = 13.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (rep.usedMapReduce) {
+                                        Text(
+                                            text = if (s.isArabic) "⚡ تم التلخيص بمحرك Map-Reduce للملفات الكبيرة (${rep.analyzedPageCount} صفحة من ${rep.totalDocumentPages})" else "⚡ Processed with Large-Book Map-Reduce Engine (${rep.analyzedPageCount} of ${rep.totalDocumentPages} pages)",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = BrandEmerald
+                                        )
+                                    }
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                         SummaryDepth.entries.forEach { d ->
                                             FilterChip(
                                                 selected = summaryDepth == d,
                                                 onClick = { summaryDepth = d },
-                                                label = { Text(if (s.isArabic) d.labelAr else d.labelEn, fontSize = 11.5.sp) }
+                                                label = { Text(if (s.isArabic) d.labelAr else d.labelEn, fontSize = 11.sp) }
                                             )
                                         }
                                     }
@@ -367,7 +549,7 @@ fun AiAssistantScreen(
                                             rep.topKeywords.forEach { kw ->
                                                 AssistChip(onClick = {
                                                     questionInput = kw
-                                                    activeTab = 1
+                                                    activeTab = 2
                                                 }, label = { Text(kw, fontSize = 11.5.sp) })
                                             }
                                         }
@@ -390,10 +572,14 @@ fun AiAssistantScreen(
                                                 runCatching {
                                                     val summaryBody = buildString {
                                                         append("AI Summary of: ${file.name}\n")
-                                                        append("Language: ${rep.languageStats.primary.labelEn} | Words: ${rep.languageStats.wordCount}\n\n")
+                                                        append("Pages analyzed: ${rep.analyzedPageCount}/${rep.totalDocumentPages} | Words: ${rep.languageStats.wordCount}\n\n")
                                                         rep.summaryBullets.forEachIndexed { i, b -> append("${i + 1}. $b\n\n") }
-                                                        if (rep.topKeywords.isNotEmpty()) {
-                                                            append("Key Topics: ${rep.topKeywords.joinToString(", ")}\n")
+                                                        if (rep.chapterSummaries.isNotEmpty()) {
+                                                            append("\n--- Section Breakdown ---\n")
+                                                            rep.chapterSummaries.forEach { ch ->
+                                                                append("\nPages ${ch.startPage}-${ch.endPage}: ${ch.headline}\n")
+                                                                ch.bullets.forEach { append("  - $it\n") }
+                                                            }
                                                         }
                                                     }
                                                     val out = FileHelper.uniqueFile(
@@ -409,12 +595,7 @@ fun AiAssistantScreen(
                                                     )
                                                     val info = app.pdfEngine.inspectDocument(out)
                                                     app.repository.upsertDocument(
-                                                        PdfDocumentItem(
-                                                            name = out.name,
-                                                            path = out.absolutePath,
-                                                            sizeBytes = info.sizeBytes,
-                                                            pageCount = info.pageCount
-                                                        )
+                                                        PdfDocumentItem(name = out.name, path = out.absolutePath, sizeBytes = info.sizeBytes, pageCount = info.pageCount)
                                                     )
                                                     Toast.makeText(context, "Saved ${out.name}", Toast.LENGTH_SHORT).show()
                                                     onOpenPdfAtPage(out.absolutePath, 0)
@@ -429,18 +610,131 @@ fun AiAssistantScreen(
                                 }
                             }
                         }
+
+                        // Chapter-by-Chapter Map-Reduce Breakdown for Large Books
+                        if (rep.chapterSummaries.isNotEmpty()) {
+                            item {
+                                Card(shape = RoundedCornerShape(16.dp)) {
+                                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Text(
+                                            text = if (s.isArabic) "ملخص الأقسام والفصول (${rep.chapterSummaries.size} أقسام)" else "Chapter-by-Chapter Breakdown (${rep.chapterSummaries.size} Sections)",
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                        rep.chapterSummaries.forEach { ch ->
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                                shape = RoundedCornerShape(12.dp),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable { onOpenPdfAtPage(file.absolutePath, ch.startPage - 1) }
+                                            ) {
+                                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                    Text(
+                                                        text = "P.${ch.startPage}–${ch.endPage}: ${ch.headline}",
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 12.5.sp,
+                                                        color = BrandBlue
+                                                    )
+                                                    ch.bullets.forEach { b ->
+                                                        Text("• $b", fontSize = 12.5.sp, lineHeight = 18.sp)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
-                    // TAB 1: OFFLINE TRANSLATE (EN <-> AR) & ON-DEVICE GEN-AI
+                    // TAB 1: DOWNLOADABLE FULL OFFLINE AR<->EN NEURAL DICTIONARY + TRANSLATE + SAVED HISTORY
                     1 -> {
+                        // Offline Neural Language Pack Manager Card
+                        item {
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (neuralPackReady) BrandEmerald.copy(alpha = 0.12f) else BrandBlue.copy(alpha = 0.10f)
+                                ),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = if (s.isArabic) "القاموس العصبي الكامل (عربي ↔ إنجليزي) — أوفلاين" else "Downloadable Complete AR ↔ EN Neural Dictionary",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        text = if (neuralPackReady) {
+                                            if (s.isArabic) "✓ القاموس العصبي الكامل (عربي + إنجليزي) محمّل وجاهز! الترجمة كاملة وصحيحة 100% بدون إنترنت للملفات والكاميرا."
+                                            else "✓ Complete Arabic & English Neural Translation Pack is installed locally! Full grammatical translation works 100% offline for PDFs & Live Camera."
+                                        } else {
+                                            if (s.isArabic) "نزّل القاموس العربي والإنجليزي الكامل مرة واحدة من الإنترنت (~30 ميجابايت) لتعمل الترجمة الكاملة والصحيحة أوفلاين دائماً وحفظ الترجمات محلياً."
+                                            else "Download the full Arabic & English on-device neural pack once (~30 MB over HTTPS) for accurate, full-sentence offline translation across PDFs and Live Camera."
+                                        },
+                                        fontSize = 12.5.sp
+                                    )
+
+                                    if (isDownloadingPack) {
+                                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                        Text(packDownloadMsg.ifBlank { "Downloading..." }, fontSize = 12.sp, color = BrandBlue)
+                                    } else {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Button(
+                                                onClick = {
+                                                    scope.launch {
+                                                        isDownloadingPack = true
+                                                        val res = app.translationManager.downloadArabicEnglishModels(wifiOnly = false) { msg ->
+                                                            packDownloadMsg = msg
+                                                        }
+                                                        isDownloadingPack = false
+                                                        if (res.isSuccess) {
+                                                            neuralPackReady = true
+                                                            Toast.makeText(
+                                                                context,
+                                                                if (s.isArabic) "تم تنزيل القاموس الكامل وحفظه أوفلاين بنجاح!" else "Complete AR+EN Offline Dictionary Pack Ready!",
+                                                                Toast.LENGTH_LONG
+                                                            ).show()
+                                                        } else {
+                                                            Toast.makeText(context, res.exceptionOrNull()?.message ?: "Download failed — check internet connection", Toast.LENGTH_LONG).show()
+                                                        }
+                                                    }
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                                colors = ButtonDefaults.buttonColors(containerColor = if (neuralPackReady) BrandTeal else BrandBlue)
+                                            ) {
+                                                Icon(Icons.Default.CloudDownload, null, modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(
+                                                    if (neuralPackReady) (if (s.isArabic) "تحديث / التحقق من القاموس" else "Verify / Re-Sync Pack")
+                                                    else (if (s.isArabic) "تنزيل القاموس العربي والإنجليزي (~30MB)" else "Download AR+EN Pack (~30MB)"),
+                                                    fontSize = 11.5.sp
+                                                )
+                                            }
+                                            if (neuralPackReady) {
+                                                OutlinedButton(onClick = {
+                                                    scope.launch {
+                                                        app.translationManager.deleteOfflineModels()
+                                                        neuralPackReady = false
+                                                        Toast.makeText(context, "Removed downloaded neural packs", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }) {
+                                                    Icon(Icons.Default.Delete, null, tint = BrandCrimson, modifier = Modifier.size(16.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Document Translation Controls
                         item {
                             Card(shape = RoundedCornerShape(16.dp)) {
                                 Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Text(
-                                        text = if (s.isArabic) "الترجمة الفورية بدون إنترنت (عربي ↔ إنجليزي)" else "100% Offline Bilingual Translation (EN ↔ AR)",
+                                        text = if (s.isArabic) "ترجمة الملف بالكامل وحفظها محلياً" else "Translate Document & Save Locally",
                                         style = MaterialTheme.typography.titleMedium
                                     )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         TranslationDirection.entries.forEach { dir ->
                                             FilterChip(
                                                 selected = translateDir == dir,
@@ -449,15 +743,42 @@ fun AiAssistantScreen(
                                             )
                                         }
                                     }
+
+                                    if (isTranslating) {
+                                        LinearProgressIndicator(progress = { translateProgress }, modifier = Modifier.fillMaxWidth())
+                                        Text("${(translateProgress * 100).toInt()}% ...", fontSize = 12.sp)
+                                    }
+
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Button(
+                                            enabled = !isTranslating,
                                             onClick = {
-                                                val raw = pagesText.joinToString("\n\n").take(6000)
-                                                translatedPreview = OfflineTranslatorEngine.translate(raw, translateDir)
+                                                scope.launch {
+                                                    isTranslating = true
+                                                    translateProgress = 0.05f
+                                                    val raw = pagesText.joinToString("\n\n").take(35_000)
+                                                    val res = app.translationManager.translateSmartOffline(
+                                                        text = raw,
+                                                        direction = translateDir,
+                                                        sourceLabel = file.name,
+                                                        saveToHistory = true,
+                                                        onChunkProgress = { c, tot ->
+                                                            translateProgress = c.toFloat() / tot.coerceAtLeast(1)
+                                                        }
+                                                    )
+                                                    translatedPreview = res.translatedText
+                                                    translateEngineLabel = when {
+                                                        res.fromLocalCache -> if (s.isArabic) "✓ مسترجع فوراً من الذاكرة المحلية" else "✓ Instant recall from local cache"
+                                                        res.usedNeuralOfflineModel -> if (s.isArabic) "✓ مترجم بالقاموس العصبي الكامل (أوفلاين) ومحفوظ محلياً" else "✓ Translated via Full Neural Offline Pack & Saved Locally"
+                                                        else -> if (s.isArabic) "مترجم بالقاموس المدمج — نزّل القاموس العصبي أعلاه لترجمة كاملة" else "Built-in Dictionary — Download Neural Pack above for full sentences"
+                                                    }
+                                                    savedTranslations = app.translationManager.loadSavedTranslations()
+                                                    isTranslating = false
+                                                }
                                             },
                                             modifier = Modifier.weight(1f)
                                         ) {
-                                            Text(if (s.isArabic) "ترجمة الملف الآن" else "Translate PDF Now")
+                                            Text(if (s.isArabic) "ترجمة الملف وحفظه محلياً" else "Translate & Save Locally")
                                         }
                                         if (translatedPreview.isNotBlank()) {
                                             OutlinedButton(onClick = {
@@ -481,11 +802,60 @@ fun AiAssistantScreen(
                                                         onOpenPdfAtPage(out.absolutePath, 0)
                                                     }
                                                 }
-                                            }) { Text("Save PDF") }
+                                            }) { Text("PDF") }
                                         }
                                     }
+
+                                    if (translateEngineLabel.isNotBlank()) {
+                                        Text(translateEngineLabel, fontSize = 12.sp, color = BrandEmerald, fontWeight = FontWeight.SemiBold)
+                                    }
                                     if (translatedPreview.isNotBlank()) {
-                                        Text(translatedPreview.take(4000), fontSize = 13.sp, lineHeight = 20.sp)
+                                        Text(translatedPreview.take(6000), fontSize = 13.sp, lineHeight = 20.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Saved Local Translations History Card
+                        if (savedTranslations.isNotEmpty()) {
+                            item {
+                                Card(shape = RoundedCornerShape(16.dp)) {
+                                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Icon(Icons.Default.History, null, tint = BrandPurple, modifier = Modifier.size(18.dp))
+                                                Text(
+                                                    text = if (s.isArabic) "الترجمات المحفوظة محلياً (${savedTranslations.size})" else "Saved Local Translations (${savedTranslations.size})",
+                                                    style = MaterialTheme.typography.titleMedium
+                                                )
+                                            }
+                                            TextButton(onClick = {
+                                                app.translationManager.clearSavedTranslations()
+                                                savedTranslations = emptyList()
+                                            }) { Text(if (s.isArabic) "مسح الكل" else "Clear", color = BrandCrimson, fontSize = 11.5.sp) }
+                                        }
+
+                                        savedTranslations.take(10).forEach { rec ->
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable { translatedPreview = rec.translatedText }
+                                            ) {
+                                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                        Text("${rec.sourceLabel} • ${rec.directionLabel}", fontWeight = FontWeight.Bold, fontSize = 11.5.sp, color = BrandBlue)
+                                                        Text(rec.engineUsed, fontSize = 10.5.sp, color = BrandEmerald)
+                                                    }
+                                                    Text(rec.translatedText.take(180), fontSize = 12.5.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -535,8 +905,8 @@ fun AiAssistantScreen(
                                         style = MaterialTheme.typography.titleMedium
                                     )
                                     Text(
-                                        text = if (s.isArabic) "يمكنك اختيار نموذج محلي (.gguf مثل Qwen2.5 أو Gemma3) من ذاكرة جهازك بدون إنترنت للتحقق منه وتجهيزه."
-                                        else "Import any local .gguf model (e.g. Qwen 2.5 / Gemma 3 Arabic-English) from device storage offline to validate its header & prepare local inference.",
+                                        text = if (s.isArabic) "استورد أي نموذج محلي (.gguf مثل Qwen2.5 أو Gemma3) من ذاكرة جهازك بدون إنترنت للتحقق منه."
+                                        else "Import any local .gguf model (e.g. Qwen 2.5 / Gemma 3 Arabic-English) from device storage offline to validate its header.",
                                         fontSize = 12.5.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -561,13 +931,13 @@ fun AiAssistantScreen(
                         }
                     }
 
-                    // TAB 2: ASK YOUR PDF (OFFLINE SEMANTIC Q&A)
+                    // TAB 2: ASK YOUR PDF (ULTRA-FAST INVERTED-INDEX BM25 Q&A FOR 1,000+ PAGES)
                     2 -> {
                         item {
                             Card(shape = RoundedCornerShape(16.dp)) {
                                 Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text(
-                                        text = if (s.isArabic) "اسأل أي سؤال عن محتوى الملف (عربي أو إنجليزي)" else "Ask Any Question About This PDF (EN / AR)",
+                                        text = if (s.isArabic) "اسأل أي سؤال عبر ${rep.analyzedPageCount} صفحة (فهرسة فورية)" else "Ask Any Question Across ${rep.analyzedPageCount} Pages (Indexed BM25)",
                                         style = MaterialTheme.typography.titleMedium
                                     )
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -582,7 +952,13 @@ fun AiAssistantScreen(
                                         )
                                         Button(onClick = {
                                             if (questionInput.isNotBlank()) {
-                                                val res = OfflineAiPdfEngine.askQuestion(pagesText, questionInput.trim())
+                                                val q = questionInput.trim()
+                                                val idx = largeDocIndex
+                                                val res = if (idx != null) {
+                                                    OfflineAiPdfEngine.askQuestionIndexed(idx, q)
+                                                } else {
+                                                    OfflineAiPdfEngine.askQuestion(pagesText, q)
+                                                }
                                                 qaHistory.add(0, res)
                                                 questionInput = ""
                                             }
@@ -776,6 +1152,10 @@ fun AiAssistantScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
+                                    appliedRangeStart = 1
+                                    appliedRangeEnd = null
+                                    rangeStartInput = "1"
+                                    rangeEndInput = ""
                                     selectedFile = File(doc.path)
                                     showLibraryPicker = false
                                 }

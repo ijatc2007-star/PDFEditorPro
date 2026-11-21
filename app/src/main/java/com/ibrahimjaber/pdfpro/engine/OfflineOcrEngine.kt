@@ -171,4 +171,29 @@ class OfflineOcrEngine(private val context: Context) {
             searchablePdfPath = outPdfPath
         )
     }
+
+    /**
+     * Fast single-bitmap offline OCR (Arabic + English) used by Live Camera Translate and CamScanner Pro.
+     */
+    suspend fun ocrBitmap(
+        bitmap: Bitmap,
+        mode: OcrLanguageMode = OcrLanguageMode.ARABIC_AND_ENGLISH
+    ): String = withContext(Dispatchers.IO) {
+        val availableLangs = ensureTessDataReady()
+        if (availableLangs.isEmpty()) return@withContext ""
+
+        val requestedParts = mode.tessCode.split("+").filter { it in availableLangs }
+        val effectiveLang = requestedParts.ifEmpty { listOf(availableLangs.first()) }.joinToString("+")
+
+        val argb = if (bitmap.config == Bitmap.Config.ARGB_8888) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, false)
+        val tess = TessBaseAPI()
+        try {
+            if (!tess.init(ocrRootDir.absolutePath, effectiveLang)) return@withContext ""
+            tess.setImage(argb)
+            ArabicTextProcessor.cleanExtractedText(tess.utF8Text ?: "")
+        } finally {
+            tess.recycle()
+            if (argb !== bitmap && !argb.isRecycled) argb.recycle()
+        }
+    }
 }

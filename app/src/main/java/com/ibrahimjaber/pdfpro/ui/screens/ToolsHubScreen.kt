@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BrandingWatermark
 import androidx.compose.material.icons.filled.CallMerge
 import androidx.compose.material.icons.filled.CallSplit
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.Compare
 import androidx.compose.material.icons.filled.Compress
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TextSnippet
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -67,8 +69,10 @@ data class ProToolCardItem(
 )
 
 val ALL_PRO_TOOLS = listOf(
+    ProToolCardItem("cam_scanner", "CamScanner Pro", "ماسح CamScanner", "Scan docs, auto-crop, Magic Color & OCR PDF", "مسح المستندات بالكاميرا + فلاتر سحرية + OCR", Icons.Default.CameraAlt, BrandEmerald),
+    ProToolCardItem("camera_translate", "Camera Translate", "ترجمة فورية بالكاميرا", "Point camera → Offline AR↔EN neural translate", "ترجمة فورية بالكاميرا باستخدام القاموس أوفلاين", Icons.Default.Translate, BrandTeal),
     ProToolCardItem("ocr_studio", "Arabic & EN OCR", "التعرف الضوئي OCR", "Scanned PDF → Searchable PDF (AR+EN)", "تحويل الصور الممسوحة إلى PDF قابل للبحث", Icons.Default.GridView, BrandCrimson),
-    ProToolCardItem("ai_studio", "AI Translate & Chat", "الذكاء والترجمة (AI)", "Summarize, Translate EN↔AR, Flashcards", "تلخيص وترجمة عربي↔إنجليزي وبطاقات مراجعة", Icons.Default.Info, BrandPurple),
+    ProToolCardItem("ai_studio", "AI Studio & Dict", "الذكاء والقاموس (AI)", "Large-Book AI, Download AR↔EN Pack & Q&A", "تلخيص الكتب الكبيرة + تنزيل القاموس + أسئلة", Icons.Default.Info, BrandPurple),
     ProToolCardItem("form_filler", "Fill PDF Forms", "تعبئة نماذج AcroForm", "Fill native text, checkboxes & flatten", "تعبئة حقول النماذج التفاعلية وتثبيتها", Icons.Default.TextSnippet, BrandBlue),
     ProToolCardItem("digital_sign", "X.509 Digital Sign", "توقيع رقمي مشفّر", "RSA-2048 PKCS#12 sign & verify PDFs", "توقيع تشفيري بشهادة X.509 والتحقق منه", Icons.Default.Lock, BrandEmerald),
     ProToolCardItem("converter", "Format Converter", "محول الصيغ الشامل", "PDF ↔ Word, Excel, CSV, PPTX", "تحويل PDF ↔ وورد، إكسل، CSV، صور", Icons.Default.SwapHoriz, BrandBlue),

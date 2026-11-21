@@ -61,13 +61,13 @@ jobs:
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PDFEditorPro-v4.0-IbrahimJaber2026-Android-APK
+          name: PDFEditorPro-v5.0-IbrahimJaber2026-Android-APK
           path: app/build/outputs/apk/debug/*.apk
 
       - name: Upload Google Play Release AAB Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PDFEditorPro-v4.0-IbrahimJaber2026-PlayStore-AAB
+          name: PDFEditorPro-v5.0-IbrahimJaber2026-PlayStore-AAB
           path: app/build/outputs/bundle/release/*.aab
 
       - name: Upload Security Lint Report
@@ -107,7 +107,7 @@ jobs:
       - name: Compile Standalone Windows EXE (Bundled AR/EN Tessdata)
         run: |
           pyinstaller --noconfirm --onefile --windowed `
-            --name "PDFEditorPro-v4.0-PC-IbrahimJaber2026" `
+            --name "PDFEditorPro-v5.0-PC-IbrahimJaber2026" `
             --paths desktop-pc `
             --add-data "desktop-pc/tessdata;tessdata" `
             --collect-all customtkinter `
@@ -118,5 +118,5 @@ jobs:
       - name: Upload Windows EXE Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PDFEditorPro-v4.0-PC-IbrahimJaber2026-Windows-EXE
-          path: dist/PDFEditorPro-v4.0-PC-IbrahimJaber2026.exe
+          name: PDFEditorPro-v5.0-PC-IbrahimJaber2026-Windows-EXE
+          path: dist/PDFEditorPro-v5.0-PC-IbrahimJaber2026.exe

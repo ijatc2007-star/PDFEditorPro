@@ -174,3 +174,75 @@ def test_v4_flagship_engines(tmp_path: Path):
     assert len(texts) == 1 and out_ocr and os.path.getsize(out_ocr) > 0
 
 
+def test_v5_flagship_engines(tmp_path: Path):
+    from PIL import Image, ImageDraw
+    import v5_engines_pc as v5
+
+    # 1. Local SQLite Dictionary + Persistent Translation Cache & Saved History
+    db_file = str(tmp_path / "test_v5_trans.db")
+    store = v5.LocalTranslationStore(db_path=db_file)
+    assert store.get_dictionary_count() >= 250
+
+    res1 = store.translate_smart(
+        "Executive Summary: All engineering documents must pass security verification.",
+        direction="en_to_ar",
+        source_label="UnitTest.pdf",
+        allow_online_sync=False,
+    )
+    assert "الملخص التنفيذي" in res1["translated"]
+    assert res1["from_cache"] is False
+
+    # Second identical lookup must hit local SQLite cache instantaneously
+    res2 = store.translate_smart(
+        "Executive Summary: All engineering documents must pass security verification.",
+        direction="en_to_ar",
+        source_label="UnitTest.pdf",
+        allow_online_sync=False,
+    )
+    assert res2["from_cache"] is True
+    assert res2["translated"] == res1["translated"]
+    assert len(store.list_saved_history()) >= 1
+
+    # 2. CamScanner Pro filters (Magic Color, Crisp B&W, Shadow Remove, Grayscale) & Batch PDF
+    raw_img = tmp_path / "scan_page.jpg"
+    img = Image.new("RGB", (600, 800), color=(238, 236, 230))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([20, 20, 580, 780], outline=(60, 60, 60), width=2)
+    draw.text((60, 80), "PDF Editor Pro v5.0 CamScanner Test", fill=(20, 20, 20))
+    img.save(raw_img, "JPEG")
+
+    for mode in ("magic_color", "crisp_bw", "shadow_remove", "grayscale", "original"):
+        out_f = str(tmp_path / f"enh_{mode}.jpg")
+        v5.camscan_enhance_image(str(raw_img), out_f, filter_mode=mode, auto_crop=True)
+        assert os.path.getsize(out_f) > 0
+
+    cam_pdf = str(tmp_path / "camscan_out.pdf")
+    saved_pdf, _ = v5.camscan_batch_to_pdf([str(raw_img)], cam_pdf, filter_mode="magic_color", run_ocr=False)
+    assert os.path.getsize(saved_pdf) > 0
+
+    # 3. Large-PDF Map-Reduce AI Engine & Inverted-Index BM25 Q&A (120-page book)
+    big_pages = []
+    for p in range(1, 121):
+        if p == 1:
+            big_pages.append("Chapter 1 Network Security Overview.\nAll firewalls must be audited before 2026-12-31.")
+        elif p == 60:
+            big_pages.append("Chapter 6 Annual Budget Allocation.\nTotal approved budget is $450,000 USD for offline deployment.")
+        elif p == 115:
+            big_pages.append("الفصل العاشر الخاتمة.\nيجب اعتماد التوقيع الرقمي والترجمة الفورية بالكاميرا لجميع الفرق.")
+        else:
+            big_pages.append(f"Section {p} Compliance Procedure.\nPage {p} covers enterprise archiving and offline privacy controls.")
+
+    rep = v5.analyze_large_document_pc(big_pages, start_page_1based=1, total_doc_pages=120, num_sentences=8)
+    assert rep["used_map_reduce"] is True
+    assert rep["analyzed_pages"] == 120
+    assert len(rep["chapter_summaries"]) >= 4
+    assert any("450,000" in a for a in rep["amounts"])
+
+    idx = v5.LargeDocIndexPC(big_pages, start_page_1based=1)
+    hits_en = idx.ask("annual budget 450,000 USD")
+    assert any(pg == 60 for pg, _, _ in hits_en)
+    hits_ar = idx.ask("التوقيع الرقمي والترجمة الفورية")
+    assert any(pg == 115 for pg, _, _ in hits_ar)
+
+
+

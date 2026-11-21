@@ -1,0 +1,1132 @@
+package com.ibrahimjaber.pdfpro.ui.screens
+
+import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
+import android.graphics.Matrix
+import android.graphics.Rect
+import android.graphics.YuvImage
+import android.net.Uri
+import android.speech.tts.TextToSpeech
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FlashOff
+import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.RotateRight
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.ibrahimjaber.pdfpro.PdfProApp
+import com.ibrahimjaber.pdfpro.data.LocalStrings
+import com.ibrahimjaber.pdfpro.data.PageTemplate
+import com.ibrahimjaber.pdfpro.data.PdfDocumentItem
+import com.ibrahimjaber.pdfpro.engine.CamScannerEngine
+import com.ibrahimjaber.pdfpro.engine.ConverterCodec
+import com.ibrahimjaber.pdfpro.engine.FileHelper
+import com.ibrahimjaber.pdfpro.engine.OcrLanguageMode
+import com.ibrahimjaber.pdfpro.engine.ScanFilter
+import com.ibrahimjaber.pdfpro.engine.ScannedPageItem
+import com.ibrahimjaber.pdfpro.engine.TranslationDirection
+import com.ibrahimjaber.pdfpro.ui.theme.BrandBlue
+import com.ibrahimjaber.pdfpro.ui.theme.BrandCrimson
+import com.ibrahimjaber.pdfpro.ui.theme.BrandEmerald
+import com.ibrahimjaber.pdfpro.ui.theme.BrandNavy
+import com.ibrahimjaber.pdfpro.ui.theme.BrandPurple
+import com.ibrahimjaber.pdfpro.ui.theme.BrandTeal
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+
+// =============================================================================
+// SCREEN 1: CAMSCANNER PRO (MULTI-PAGE DOCUMENT SCANNER + OCR + TRANSLATE)
+// =============================================================================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CamScannerScreen(
+    app: PdfProApp,
+    onBack: () -> Unit,
+    onOpenPdf: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val s = LocalStrings.current
+
+    val scannedPages = remember { mutableStateListOf<ScannedPageItem>() }
+    var selectedIndex by remember { mutableIntStateOf(0) }
+    var activeFilter by remember { mutableStateOf(ScanFilter.MAGIC_COLOR) }
+    var autoCropEnabled by remember { mutableStateOf(true) }
+    var makeSearchableOcr by remember { mutableStateOf(true) }
+    var ocrLang by remember { mutableStateOf(OcrLanguageMode.ARABIC_AND_ENGLISH) }
+
+    var isProcessing by remember { mutableStateOf(false) }
+    var statusText by remember { mutableStateOf("") }
+    var progressRatio by remember { mutableStateOf(0f) }
+    var translatedScanResult by remember { mutableStateOf("") }
+    var previewBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    var pendingCameraFile by remember { mutableStateOf<File?>(null) }
+
+    fun refreshPreview(item: ScannedPageItem?) {
+        scope.launch {
+            val bmp = withContext(Dispatchers.IO) {
+                item?.let { CamScannerEngine.decodeScaledBitmap(it.enhancedImagePath, maxDimension = 1200) }
+            }
+            previewBitmap = bmp
+        }
+    }
+
+    fun ingestRawImageFile(rawFile: File) {
+        scope.launch {
+            isProcessing = true
+            statusText = if (s.isArabic) "جاري تحسين المسح الضوئي (CamScanner)..." else "Enhancing scanned page (CamScanner)..."
+            runCatching {
+                val outEnhanced = File(context.cacheDir, "camscan_enh_${System.currentTimeMillis()}_${scannedPages.size}.jpg")
+                CamScannerEngine.processScanPage(
+                    rawFilePath = rawFile.absolutePath,
+                    outputFile = outEnhanced,
+                    filter = activeFilter,
+                    autoCrop = autoCropEnabled,
+                    rotationDegrees = 0
+                )
+                val newItem = ScannedPageItem(
+                    rawImagePath = rawFile.absolutePath,
+                    enhancedImagePath = outEnhanced.absolutePath,
+                    filter = activeFilter,
+                    rotationDegrees = 0,
+                    autoCropped = autoCropEnabled
+                )
+                scannedPages.add(newItem)
+                selectedIndex = scannedPages.lastIndex
+                refreshPreview(newItem)
+            }.onFailure { err ->
+                Toast.makeText(context, err.message ?: "Scan processing failed", Toast.LENGTH_LONG).show()
+            }
+            isProcessing = false
+            statusText = ""
+        }
+    }
+
+    fun reprocessSelectedPage(newFilter: ScanFilter, newAutoCrop: Boolean, newRotation: Int) {
+        val idx = selectedIndex
+        val current = scannedPages.getOrNull(idx) ?: return
+        scope.launch {
+            isProcessing = true
+            statusText = if (s.isArabic) "تطبيق الفلتر..." else "Applying CamScanner filter..."
+            runCatching {
+                val outEnhanced = File(context.cacheDir, "camscan_enh_${System.currentTimeMillis()}_$idx.jpg")
+                CamScannerEngine.processScanPage(
+                    rawFilePath = current.rawImagePath,
+                    outputFile = outEnhanced,
+                    filter = newFilter,
+                    autoCrop = newAutoCrop,
+                    rotationDegrees = newRotation
+                )
+                val updated = current.copy(
+                    enhancedImagePath = outEnhanced.absolutePath,
+                    filter = newFilter,
+                    autoCropped = newAutoCrop,
+                    rotationDegrees = newRotation
+                )
+                scannedPages[idx] = updated
+                refreshPreview(updated)
+            }.onFailure { err ->
+                Toast.makeText(context, err.message ?: "Filter error", Toast.LENGTH_SHORT).show()
+            }
+            isProcessing = false
+            statusText = ""
+        }
+    }
+
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val file = pendingCameraFile
+        if (success && file != null && file.exists() && file.length() > 0L) {
+            ingestRawImageFile(file)
+        }
+    }
+
+    fun launchSystemCamera() {
+        val rawFile = File(context.cacheDir, "camscan_raw_${System.currentTimeMillis()}.jpg")
+        pendingCameraFile = rawFile
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", rawFile)
+        takePictureLauncher.launch(uri)
+    }
+
+    val cameraPermLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) launchSystemCamera()
+        else Toast.makeText(context, if (s.isArabic) "يرجى السماح بإذن الكاميرا أو اختيار صور من المعرض" else "Camera permission denied — you can still pick photos from Gallery.", Toast.LENGTH_LONG).show()
+    }
+
+    val galleryMultiLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            scope.launch {
+                isProcessing = true
+                for ((i, uri) in uris.withIndex()) {
+                    statusText = if (s.isArabic) "تحسين الصفحة ${i + 1} / ${uris.size}..." else "Enhancing page ${i + 1} / ${uris.size}..."
+                    val copied = FileHelper.copyAnyFileFromUriToCache(context, uri) ?: continue
+                    runCatching {
+                        val outEnhanced = File(context.cacheDir, "camscan_enh_${System.currentTimeMillis()}_$i.jpg")
+                        CamScannerEngine.processScanPage(
+                            rawFilePath = copied.absolutePath,
+                            outputFile = outEnhanced,
+                            filter = activeFilter,
+                            autoCrop = autoCropEnabled,
+                            rotationDegrees = 0
+                        )
+                        scannedPages.add(
+                            ScannedPageItem(
+                                rawImagePath = copied.absolutePath,
+                                enhancedImagePath = outEnhanced.absolutePath,
+                                filter = activeFilter,
+                                autoCropped = autoCropEnabled
+                            )
+                        )
+                    }
+                }
+                if (scannedPages.isNotEmpty()) {
+                    selectedIndex = scannedPages.lastIndex
+                    refreshPreview(scannedPages[selectedIndex])
+                }
+                isProcessing = false
+                statusText = ""
+            }
+        }
+    }
+
+    LaunchedEffect(selectedIndex, scannedPages.size) {
+        val item = scannedPages.getOrNull(selectedIndex)
+        if (item != null) {
+            activeFilter = item.filter
+            autoCropEnabled = item.autoCropped
+            refreshPreview(item)
+        } else {
+            previewBitmap = null
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                title = {
+                    Text(if (s.isArabic) "ماسح CamScanner الاحترافي" else "CamScanner Pro (Offline)")
+                }
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Capture Controls Card
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = BrandNavy),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = if (s.isArabic) "التصوير والمسح الضوئي متعدد الصفحات (أوفلاين)" else "Multi-Page Document Scanner (100% Offline)",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.5.sp
+                        )
+                        Text(
+                            text = if (s.isArabic) "قص تلقائي للحواف • فلتر سحري ملون • إزالة الظلال • تحويل إلى PDF قابل للبحث (عربي/إنجليزي)" else "Auto-Border Crop • Magic Color • Shadow Removal • Crisp B&W • Searchable AR+EN OCR PDF",
+                            color = Color(0xFFBAE6FD),
+                            fontSize = 12.sp
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                                    if (hasPerm) launchSystemCamera()
+                                    else cameraPermLauncher.launch(Manifest.permission.CAMERA)
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = BrandEmerald)
+                            ) {
+                                Icon(Icons.Default.AddAPhoto, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (s.isArabic) "تصوير مستند" else "Scan Camera")
+                            }
+                            OutlinedButton(
+                                onClick = { galleryMultiLauncher.launch(arrayOf("image/*")) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.PhotoLibrary, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (s.isArabic) "من المعرض" else "From Gallery", color = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (isProcessing) {
+                item {
+                    Card(shape = RoundedCornerShape(14.dp)) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(statusText.ifBlank { "Processing..." }, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            if (progressRatio > 0f) {
+                                LinearProgressIndicator(progress = { progressRatio }, modifier = Modifier.fillMaxWidth())
+                            } else {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Active Scanned Page Preview & Filters
+            if (scannedPages.isNotEmpty()) {
+                val activeItem = scannedPages.getOrNull(selectedIndex)
+                item {
+                    Card(shape = RoundedCornerShape(16.dp)) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (s.isArabic) "الصفحة ${selectedIndex + 1} من ${scannedPages.size}" else "Page ${selectedIndex + 1} of ${scannedPages.size}",
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    IconButton(onClick = {
+                                        val nextRot = ((activeItem?.rotationDegrees ?: 0) + 90) % 360
+                                        reprocessSelectedPage(activeFilter, autoCropEnabled, nextRot)
+                                    }) {
+                                        Icon(Icons.Default.RotateRight, contentDescription = "Rotate 90")
+                                    }
+                                    IconButton(onClick = {
+                                        if (selectedIndex in scannedPages.indices) {
+                                            scannedPages.removeAt(selectedIndex)
+                                            selectedIndex = (selectedIndex - 1).coerceAtLeast(0)
+                                        }
+                                    }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete Page", tint = BrandCrimson)
+                                    }
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(340.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF0F172A)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                previewBitmap?.let { bmp ->
+                                    Image(
+                                        bitmap = bmp.asImageBitmap(),
+                                        contentDescription = "Scanned Page Preview",
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } ?: CircularProgressIndicator(color = Color.White)
+                            }
+
+                            // 5 CamScanner Pro Filters
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                itemsIndexed(ScanFilter.entries) { _, filter ->
+                                    FilterChip(
+                                        selected = activeFilter == filter,
+                                        onClick = {
+                                            activeFilter = filter
+                                            reprocessSelectedPage(filter, autoCropEnabled, activeItem?.rotationDegrees ?: 0)
+                                        },
+                                        label = { Text(if (s.isArabic) filter.labelAr else filter.labelEn, fontSize = 11.5.sp) }
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(if (s.isArabic) "قص تلقائي لحواف الورقة" else "Auto-Crop Paper Edges", fontSize = 13.sp)
+                                Switch(
+                                    checked = autoCropEnabled,
+                                    onCheckedChange = { checked ->
+                                        autoCropEnabled = checked
+                                        reprocessSelectedPage(activeFilter, checked, activeItem?.rotationDegrees ?: 0)
+                                    }
+                                )
+                            }
+
+                            // Multi-page selector strip
+                            if (scannedPages.size > 1) {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    itemsIndexed(scannedPages) { idx, _ ->
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = if (idx == selectedIndex) BrandBlue else MaterialTheme.colorScheme.surfaceVariant,
+                                            modifier = Modifier.clickable { selectedIndex = idx }
+                                        ) {
+                                            Text(
+                                                text = if (s.isArabic) "صفحة ${idx + 1}" else "Page ${idx + 1}",
+                                                color = if (idx == selectedIndex) Color.White else MaterialTheme.colorScheme.onSurface,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 12.sp,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Export to PDF + OCR & Instant Translate
+                item {
+                    Card(shape = RoundedCornerShape(16.dp)) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(if (s.isArabic) "تفعيل OCR عربي + إنجليزي (PDF قابل للبحث)" else "Embed Offline AR+EN OCR Searchable Layer", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    Text(if (s.isArabic) "يستخدم نماذج Tesseract المدمجة بدون إنترنت" else "Uses bundled Tesseract 5.5 offline models", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Switch(checked = makeSearchableOcr, onCheckedChange = { makeSearchableOcr = it })
+                            }
+
+                            if (makeSearchableOcr) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OcrLanguageMode.entries.forEach { m ->
+                                        FilterChip(
+                                            selected = ocrLang == m,
+                                            onClick = { ocrLang = m },
+                                            label = { Text(if (s.isArabic) m.labelAr else m.labelEn, fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    enabled = !isProcessing,
+                                    onClick = {
+                                        scope.launch {
+                                            isProcessing = true
+                                            progressRatio = 0.05f
+                                            statusText = if (s.isArabic) "جاري إنشاء ملف PDF الممسوح..." else "Building multi-page CamScanner PDF..."
+                                            runCatching {
+                                                val outPdf = FileHelper.uniqueFile(
+                                                    FileHelper.pdfsDir(context),
+                                                    "CamScan_${System.currentTimeMillis() / 1000}.pdf"
+                                                )
+                                                val (savedPdf, _) = CamScannerEngine.exportPagesToPdf(
+                                                    pages = scannedPages.toList(),
+                                                    outputPdf = outPdf,
+                                                    runOfflineOcr = makeSearchableOcr,
+                                                    ocrEngine = app.ocrEngine,
+                                                    ocrLang = ocrLang,
+                                                    onProgress = { cur, tot ->
+                                                        progressRatio = cur.toFloat() / tot.coerceAtLeast(1)
+                                                        statusText = if (s.isArabic) "معالجة الصفحة $cur من $tot..." else "Processing page $cur of $tot..."
+                                                    }
+                                                )
+                                                val info = app.pdfEngine.inspectDocument(savedPdf)
+                                                app.repository.upsertDocument(
+                                                    PdfDocumentItem(
+                                                        name = savedPdf.name,
+                                                        path = savedPdf.absolutePath,
+                                                        sizeBytes = info.sizeBytes,
+                                                        pageCount = info.pageCount
+                                                    )
+                                                )
+                                                Toast.makeText(context, "Saved ${savedPdf.name}", Toast.LENGTH_SHORT).show()
+                                                onOpenPdf(savedPdf.absolutePath)
+                                            }.onFailure { err ->
+                                                Toast.makeText(context, err.message ?: "Export failed", Toast.LENGTH_LONG).show()
+                                            }
+                                            isProcessing = false
+                                            progressRatio = 0f
+                                            statusText = ""
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.PictureAsPdf, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(if (s.isArabic) "حفظ كـ PDF" else "Save PDF")
+                                }
+
+                                OutlinedButton(
+                                    enabled = !isProcessing,
+                                    onClick = {
+                                        val active = scannedPages.getOrNull(selectedIndex) ?: return@OutlinedButton
+                                        scope.launch {
+                                            isProcessing = true
+                                            statusText = if (s.isArabic) "قراءة النص وترجمته أوفلاين..." else "Running OCR & Offline Translation..."
+                                            runCatching {
+                                                val bmp = withContext(Dispatchers.IO) {
+                                                    CamScannerEngine.decodeScaledBitmap(active.enhancedImagePath, 1600)
+                                                }
+                                                if (bmp != null) {
+                                                    val ocrText = app.ocrEngine.ocrBitmap(bmp, ocrLang)
+                                                    bmp.recycle()
+                                                    if (ocrText.isBlank()) {
+                                                        translatedScanResult = if (s.isArabic) "لم يتم اكتشاف نص واضح في هذه الصفحة." else "No clear text detected on this scanned page."
+                                                    } else {
+                                                        val res = app.translationManager.translateSmartOffline(
+                                                            text = ocrText,
+                                                            direction = TranslationDirection.AUTO,
+                                                            sourceLabel = "CamScanner Page ${selectedIndex + 1}",
+                                                            saveToHistory = true
+                                                        )
+                                                        translatedScanResult = res.translatedText
+                                                    }
+                                                }
+                                            }.onFailure { err ->
+                                                Toast.makeText(context, err.message ?: "Translate error", Toast.LENGTH_LONG).show()
+                                            }
+                                            isProcessing = false
+                                            statusText = ""
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.Translate, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(if (s.isArabic) "ترجمة الصفحة" else "Translate Page")
+                                }
+                            }
+
+                            if (translatedScanResult.isNotBlank()) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(if (s.isArabic) "الترجمة المحفوظة محلياً:" else "Offline Translation (Saved Locally):", fontWeight = FontWeight.Bold, fontSize = 12.5.sp, color = BrandTeal)
+                                        Text(translatedScanResult, fontSize = 13.sp, lineHeight = 19.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// SCREEN 2: LIVE INSTANT CAMERA TRANSLATOR (OFFLINE OCR + DOWNLOADED AR<->EN)
+// =============================================================================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LiveCameraTranslateScreen(
+    app: PdfProApp,
+    onBack: () -> Unit,
+    onOpenPdf: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
+    val s = LocalStrings.current
+
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    var modelsDownloaded by remember { mutableStateOf(false) }
+    var isDownloadingModels by remember { mutableStateOf(false) }
+    var downloadStatus by remember { mutableStateOf("") }
+
+    var direction by remember { mutableStateOf(TranslationDirection.AUTO) }
+    var liveAutoMode by remember { mutableStateOf(true) }
+    var flashEnabled by remember { mutableStateOf(false) }
+
+    var isScanningNow by remember { mutableStateOf(false) }
+    var detectedOriginal by remember { mutableStateOf("") }
+    var translatedResult by remember { mutableStateOf("") }
+    var engineBadge by remember { mutableStateOf("") }
+
+    var boundCamera by remember { mutableStateOf<Camera?>(null) }
+    var imageCaptureRef by remember { mutableStateOf<ImageCapture?>(null) }
+
+    val analyzerBusy = remember { AtomicBoolean(false) }
+    val lastAnalyzeTimeMs = remember { AtomicLong(0L) }
+    val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+
+    // Offline TTS for reading camera translations aloud
+    var tts by remember { mutableStateOf<TextToSpeech?>(null) }
+    DisposableEffect(Unit) {
+        var engine: TextToSpeech? = null
+        engine = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts = engine
+            }
+        }
+        onDispose {
+            runCatching { engine?.stop(); engine?.shutdown() }
+            cameraExecutor.shutdown()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        modelsDownloaded = app.translationManager.areOfflineModelsReady()
+    }
+
+    val permLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted -> hasCameraPermission = granted }
+
+    LaunchedEffect(Unit) {
+        if (!hasCameraPermission) {
+            permLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    fun runOcrAndTranslateBitmap(bmp: Bitmap, saveHistory: Boolean, sourceTag: String) {
+        scope.launch {
+            isScanningNow = true
+            runCatching {
+                val ocrMode = when (direction) {
+                    TranslationDirection.EN_TO_AR -> OcrLanguageMode.ENGLISH_ONLY
+                    TranslationDirection.AR_TO_EN -> OcrLanguageMode.ARABIC_ONLY
+                    TranslationDirection.AUTO -> OcrLanguageMode.ARABIC_AND_ENGLISH
+                }
+                val text = app.ocrEngine.ocrBitmap(bmp, ocrMode)
+                if (text.length >= 2) {
+                    detectedOriginal = text
+                    val tr = app.translationManager.translateSmartOffline(
+                        text = text,
+                        direction = direction,
+                        sourceLabel = sourceTag,
+                        saveToHistory = saveHistory
+                    )
+                    translatedResult = tr.translatedText
+                    engineBadge = when {
+                        tr.fromLocalCache -> if (s.isArabic) "✓ من الذاكرة المحلية (فوري)" else "✓ Local Cache (Instant)"
+                        tr.usedNeuralOfflineModel -> if (s.isArabic) "✓ القاموس العصبي الكامل (أوفلاين)" else "✓ Neural AR+EN Pack (Offline)"
+                        else -> if (s.isArabic) "قاموس مدمج — نزّل القاموس الكامل لدقة 100%" else "Built-in Dict — Download full AR+EN pack"
+                    }
+                }
+            }.onFailure { err ->
+                Toast.makeText(context, err.message ?: "Camera OCR error", Toast.LENGTH_SHORT).show()
+            }
+            if (!bmp.isRecycled) bmp.recycle()
+            isScanningNow = false
+            analyzerBusy.set(false)
+        }
+    }
+
+    val pickGalleryPhoto = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                val f = FileHelper.copyAnyFileFromUriToCache(context, uri)
+                if (f != null) {
+                    val bmp = withContext(Dispatchers.IO) { CamScannerEngine.decodeScaledBitmap(f.absolutePath, 1500) }
+                    if (bmp != null) {
+                        runOcrAndTranslateBitmap(bmp, saveHistory = true, sourceTag = "Camera Gallery Photo")
+                    }
+                }
+            }
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                title = {
+                    Text(if (s.isArabic) "الترجمة الفورية بالكاميرا (أوفلاين)" else "Live Camera Translate (Offline)", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
+                actions = {
+                    IconButton(onClick = {
+                        flashEnabled = !flashEnabled
+                        boundCamera?.cameraControl?.enableTorch(flashEnabled)
+                    }) {
+                        Icon(if (flashEnabled) Icons.Default.FlashOn else Icons.Default.FlashOff, contentDescription = "Flash")
+                    }
+                    IconButton(onClick = { pickGalleryPhoto.launch(arrayOf("image/*")) }) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = "Gallery")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .background(Color.Black)
+        ) {
+            // Top Status Strip: Offline Neural Pack Download Status + Direction Selector
+            Surface(color = BrandNavy, modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (modelsDownloaded) {
+                            Text(
+                                text = if (s.isArabic) "✓ القاموس العصبي (عربي + إنجليزي) جاهز أوفلاين" else "✓ Offline AR+EN Neural Pack Ready",
+                                color = Color(0xFF86EFAC),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        } else if (isDownloadingModels) {
+                            Text(
+                                text = downloadStatus.ifBlank { if (s.isArabic) "جاري تنزيل القاموس..." else "Downloading AR+EN Pack..." },
+                                color = Color(0xFFFDE047),
+                                fontSize = 12.sp
+                            )
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        isDownloadingModels = true
+                                        val res = app.translationManager.downloadArabicEnglishModels(wifiOnly = false) { msg ->
+                                            downloadStatus = msg
+                                        }
+                                        isDownloadingModels = false
+                                        if (res.isSuccess) {
+                                            modelsDownloaded = true
+                                            Toast.makeText(context, if (s.isArabic) "تم تنزيل القاموس العربي والإنجليزي بنجاح!" else "Offline AR+EN Neural Pack downloaded!", Toast.LENGTH_LONG).show()
+                                        } else {
+                                            Toast.makeText(context, res.exceptionOrNull()?.message ?: "Download requires internet once", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Icon(Icons.Default.CloudDownload, null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (s.isArabic) "تنزيل القاموس الكامل (~30MB)" else "Download Full AR+EN Pack (~30MB)", color = Color.White, fontSize = 11.5.sp)
+                            }
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(if (s.isArabic) "فوري" else "Live", color = Color.White, fontSize = 11.5.sp)
+                            Switch(checked = liveAutoMode, onCheckedChange = { liveAutoMode = it })
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TranslationDirection.entries.forEach { d ->
+                            FilterChip(
+                                selected = direction == d,
+                                onClick = { direction = d },
+                                label = { Text(if (s.isArabic) d.labelAr else d.labelEn, fontSize = 10.5.sp) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // CameraX Live Viewfinder + Focus Target Box
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                if (hasCameraPermission) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            val previewView = PreviewView(ctx)
+                            val providerFuture = ProcessCameraProvider.getInstance(ctx)
+                            providerFuture.addListener({
+                                runCatching {
+                                    val provider = providerFuture.get()
+                                    val preview = Preview.Builder().build().also {
+                                        it.surfaceProvider = previewView.surfaceProvider
+                                    }
+                                    val capture = ImageCapture.Builder()
+                                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                                        .build()
+                                    imageCaptureRef = capture
+
+                                    val analysis = ImageAnalysis.Builder()
+                                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                        .build()
+                                    analysis.setAnalyzer(cameraExecutor) { proxy ->
+                                        val now = System.currentTimeMillis()
+                                        if (liveAutoMode && !analyzerBusy.get() && (now - lastAnalyzeTimeMs.get() >= 2200L)) {
+                                            if (analyzerBusy.compareAndSet(false, true)) {
+                                                lastAnalyzeTimeMs.set(now)
+                                                val bmp = imageProxyToCroppedCenterBitmap(proxy)
+                                                proxy.close()
+                                                if (bmp != null) {
+                                                    runOcrAndTranslateBitmap(bmp, saveHistory = false, sourceTag = "Live Camera")
+                                                } else {
+                                                    analyzerBusy.set(false)
+                                                }
+                                                return@setAnalyzer
+                                            }
+                                        }
+                                        proxy.close()
+                                    }
+
+                                    provider.unbindAll()
+                                    boundCamera = provider.bindToLifecycle(
+                                        lifecycleOwner,
+                                        CameraSelector.DEFAULT_BACK_CAMERA,
+                                        preview,
+                                        capture,
+                                        analysis
+                                    )
+                                }
+                            }, ContextCompat.getMainExecutor(ctx))
+                            previewView
+                        }
+                    )
+
+                    // Center Focus Frame Overlay
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .fillMaxWidth(0.86f)
+                            .height(155.dp)
+                            .border(2.dp, Color(0xFF38BDF8), RoundedCornerShape(14.dp))
+                    ) {
+                        Text(
+                            text = if (s.isArabic) "وجّه الكاميرا على النص للترجمة الفورية أوفلاين" else "Point camera at English or Arabic text",
+                            color = Color.White,
+                            fontSize = 11.5.sp,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 6.dp)
+                                .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+
+                    // Snap & Translate Shutter Button
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 14.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                val cap = imageCaptureRef ?: return@Button
+                                val outFile = File(context.cacheDir, "cam_tr_${System.currentTimeMillis()}.jpg")
+                                val opts = ImageCapture.OutputFileOptions.Builder(outFile).build()
+                                cap.takePicture(opts, cameraExecutor, object : ImageCapture.OnImageSavedCallback {
+                                    override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                                        val bmp = CamScannerEngine.decodeScaledBitmap(outFile.absolutePath, 1500)
+                                        if (bmp != null) {
+                                            runOcrAndTranslateBitmap(bmp, saveHistory = true, sourceTag = "Camera Snap")
+                                        }
+                                    }
+
+                                    override fun onError(exception: ImageCaptureException) {
+                                        analyzerBusy.set(false)
+                                    }
+                                })
+                            },
+                            shape = CircleShape,
+                            colors = ButtonDefaults.buttonColors(containerColor = BrandEmerald),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)
+                        ) {
+                            Icon(Icons.Default.CameraAlt, null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (s.isArabic) "التقاط وترجمة فورية" else "Snap & Translate", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = if (s.isArabic) "مطلوب إذن الكاميرا للترجمة الفورية، أو يمكنك اختيار صورة من المعرض." else "Camera permission is needed for live translation, or pick any photo from Gallery.",
+                            color = Color.White,
+                            fontSize = 14.sp
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(onClick = { permLauncher.launch(Manifest.permission.CAMERA) }) {
+                                Text(if (s.isArabic) "تفعيل الكاميرا" else "Grant Camera")
+                            }
+                            OutlinedButton(onClick = { pickGalleryPhoto.launch(arrayOf("image/*")) }) {
+                                Text(if (s.isArabic) "اختيار صورة" else "Pick Photo", color = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Bottom AR Translucent Translation Output Card
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(230.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isScanningNow) {
+                                if (s.isArabic) "جاري القراءة والترجمة..." else "Reading & Translating..."
+                            } else {
+                                engineBadge.ifBlank { if (s.isArabic) "نتيجة الترجمة الفورية (أوفلاين)" else "Instant Offline Translation" }
+                            },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = BrandPurple
+                        )
+                        Row {
+                            IconButton(
+                                enabled = translatedResult.isNotBlank(),
+                                onClick = {
+                                    val locale = if (ConverterCodec.containsArabic(translatedResult)) Locale("ar") else Locale.US
+                                    tts?.language = locale
+                                    tts?.speak(translatedResult.take(600), TextToSpeech.QUEUE_FLUSH, null, "cam_tts")
+                                }
+                            ) { Icon(Icons.Default.VolumeUp, contentDescription = "Speak", modifier = Modifier.size(18.dp)) }
+
+                            IconButton(
+                                enabled = translatedResult.isNotBlank(),
+                                onClick = {
+                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    cm.setPrimaryClip(ClipData.newPlainText("Camera Translation", translatedResult))
+                                    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                                }
+                            ) { Icon(Icons.Default.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(18.dp)) }
+
+                            IconButton(
+                                enabled = translatedResult.isNotBlank(),
+                                onClick = {
+                                    scope.launch {
+                                        app.translationManager.translateSmartOffline(
+                                            text = detectedOriginal.ifBlank { translatedResult },
+                                            direction = direction,
+                                            sourceLabel = "Saved Camera Translation",
+                                            saveToHistory = true
+                                        )
+                                        Toast.makeText(context, if (s.isArabic) "تم حفظ الترجمة محلياً" else "Saved translation locally!", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            ) { Icon(Icons.Default.Save, contentDescription = "Save Locally", modifier = Modifier.size(18.dp)) }
+
+                            IconButton(
+                                enabled = translatedResult.isNotBlank(),
+                                onClick = {
+                                    scope.launch {
+                                        runCatching {
+                                            val out = FileHelper.uniqueFile(FileHelper.pdfsDir(context), "Camera_Translation_${System.currentTimeMillis() / 1000}.pdf")
+                                            val body = "Original:\n$detectedOriginal\n\nTranslation:\n$translatedResult"
+                                            app.pdfEngine.createNewPdf(out, "Camera Translation", body, 1, PageTemplate.BLANK)
+                                            val info = app.pdfEngine.inspectDocument(out)
+                                            app.repository.upsertDocument(PdfDocumentItem(name = out.name, path = out.absolutePath, sizeBytes = info.sizeBytes, pageCount = info.pageCount))
+                                            onOpenPdf(out.absolutePath)
+                                        }
+                                    }
+                                }
+                            ) { Icon(Icons.Default.PictureAsPdf, contentDescription = "Export PDF", modifier = Modifier.size(18.dp)) }
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (translatedResult.isBlank()) {
+                            Text(
+                                text = if (s.isArabic) "وجّه الكاميرا إلى أي كتاب أو لافتة أو مستند، أو اضغط 'التقاط وترجمة فورية'." else "Point your camera at any English or Arabic book, sign, or document — or tap 'Snap & Translate'.",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Text(translatedResult, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, lineHeight = 22.sp)
+                            if (detectedOriginal.isNotBlank()) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "${if (s.isArabic) "الأصل:" else "Original:"} ${detectedOriginal.take(280)}",
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Converts a CameraX YUV_420_888 ImageProxy to a rotated Bitmap cropped to the center focus region
+ * for fast, accurate real-time offline Tesseract OCR.
+ */
+private fun imageProxyToCroppedCenterBitmap(proxy: ImageProxy): Bitmap? {
+    return runCatching {
+        val yBuffer = proxy.planes[0].buffer
+        val uBuffer = proxy.planes[1].buffer
+        val vBuffer = proxy.planes[2].buffer
+        val ySize = yBuffer.remaining()
+        val uSize = uBuffer.remaining()
+        val vSize = vBuffer.remaining()
+
+        val nv21 = ByteArray(ySize + uSize + vSize)
+        yBuffer.get(nv21, 0, ySize)
+        vBuffer.get(nv21, ySize, vSize)
+        uBuffer.get(nv21, ySize + vSize, uSize)
+
+        val yuv = YuvImage(nv21, ImageFormat.NV21, proxy.width, proxy.height, null)
+        val out = ByteArrayOutputStream()
+        yuv.compressToJpeg(Rect(0, 0, proxy.width, proxy.height), 85, out)
+        val raw = BitmapFactory.decodeByteArray(out.toByteArray(), 0, out.size()) ?: return null
+
+        val rot = proxy.imageInfo.rotationDegrees
+        val oriented = if (rot != 0) {
+            val m = Matrix().apply { postRotate(rot.toFloat()) }
+            Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, m, true).also { raw.recycle() }
+        } else raw
+
+        // Crop center 86% width x 42% height matching the focus target box
+        val cx = (oriented.width * 0.07f).toInt().coerceAtLeast(0)
+        val cy = (oriented.height * 0.29f).toInt().coerceAtLeast(0)
+        val cw = (oriented.width * 0.86f).toInt().coerceAtMost(oriented.width - cx)
+        val ch = (oriented.height * 0.42f).toInt().coerceAtMost(oriented.height - cy)
+        Bitmap.createBitmap(oriented, cx, cy, cw, ch).also {
+            if (it !== oriented) oriented.recycle()
+        }
+    }.getOrNull()
+}

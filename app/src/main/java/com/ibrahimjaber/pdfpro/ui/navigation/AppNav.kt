@@ -26,10 +26,12 @@ import androidx.navigation.navArgument
 import com.ibrahimjaber.pdfpro.PdfProApp
 import com.ibrahimjaber.pdfpro.data.LocalStrings
 import com.ibrahimjaber.pdfpro.ui.screens.AiAssistantScreen
+import com.ibrahimjaber.pdfpro.ui.screens.CamScannerScreen
 import com.ibrahimjaber.pdfpro.ui.screens.ConverterScreen
 import com.ibrahimjaber.pdfpro.ui.screens.DigitalSignatureScreen
 import com.ibrahimjaber.pdfpro.ui.screens.FormFillerScreen
 import com.ibrahimjaber.pdfpro.ui.screens.HomeScreen
+import com.ibrahimjaber.pdfpro.ui.screens.LiveCameraTranslateScreen
 import com.ibrahimjaber.pdfpro.ui.screens.OcrStudioScreen
 import com.ibrahimjaber.pdfpro.ui.screens.PageOrganizerScreen
 import com.ibrahimjaber.pdfpro.ui.screens.ProToolWorkspaceScreen
@@ -42,6 +44,8 @@ object Routes {
     const val CONVERTER = "converter"
     const val AI_STUDIO = "ai_studio"
     const val AI_STUDIO_FILE = "ai_studio/{path}"
+    const val CAM_SCANNER = "cam_scanner"
+    const val CAMERA_TRANSLATE = "camera_translate"
     const val OCR_STUDIO = "ocr_studio?path={path}"
     const val FORM_FILLER = "form_filler?path={path}"
     const val DIGITAL_SIGN = "digital_sign"
@@ -89,6 +93,8 @@ fun PdfProNavHost(
         when (toolId) {
             "converter" -> navController.navigate(Routes.CONVERTER)
             "ai_studio" -> navController.navigate(Routes.AI_STUDIO)
+            "cam_scanner" -> navController.navigate(Routes.CAM_SCANNER)
+            "camera_translate" -> navController.navigate(Routes.CAMERA_TRANSLATE)
             "ocr_studio" -> navController.navigate(Routes.ocrFor())
             "form_filler" -> navController.navigate(Routes.formFor())
             "digital_sign" -> navController.navigate(Routes.DIGITAL_SIGN)
@@ -230,6 +236,22 @@ fun PdfProNavHost(
 
             composable(Routes.DIGITAL_SIGN) {
                 DigitalSignatureScreen(
+                    app = app,
+                    onBack = { navController.popBackStack() },
+                    onOpenPdf = { path -> navController.navigate(Routes.viewer(path)) }
+                )
+            }
+
+            composable(Routes.CAM_SCANNER) {
+                CamScannerScreen(
+                    app = app,
+                    onBack = { navController.popBackStack() },
+                    onOpenPdf = { path -> navController.navigate(Routes.viewer(path)) }
+                )
+            }
+
+            composable(Routes.CAMERA_TRANSLATE) {
+                LiveCameraTranslateScreen(
                     app = app,
                     onBack = { navController.popBackStack() },
                     onOpenPdf = { path -> navController.navigate(Routes.viewer(path)) }

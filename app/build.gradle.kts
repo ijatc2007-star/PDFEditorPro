@@ -12,8 +12,8 @@ android {
         applicationId = "com.ibrahimjaber.pdfpro"
         minSdk = 24
         targetSdk = 35
-        versionCode = 4
-        versionName = "4.0.0"
+        versionCode = 5
+        versionName = "5.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -98,11 +98,20 @@ dependencies {
     implementation(libs.androidx.exifinterface)
     implementation(libs.androidx.documentfile)
 
+    // CameraX for CamScanner Pro & Live Offline Camera Translation
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+
     // 100% Offline PDF Editing, AcroForms & Cryptographic X.509 Signing (Apache PDFBox-Android)
     implementation(libs.pdfbox.android)
 
     // 100% Offline Arabic & English Scanned-PDF OCR (Tesseract 5 LSTM)
     implementation(libs.tesseract4android)
+
+    // Downloadable On-Device Neural Translation (Arabic <-> English) — runs 100% offline after 1-time download
+    implementation(libs.mlkit.translate)
 
     // Offline QR Code Stamp Generation
     implementation(libs.zxing.core)

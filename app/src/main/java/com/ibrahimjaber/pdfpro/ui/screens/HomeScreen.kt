@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
@@ -42,6 +43,7 @@ import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -270,6 +272,29 @@ fun HomeScreen(
                         }
                     }
                 }
+            }
+        }
+
+        // v5.0 Flagship Camera Shortcuts (CamScanner Pro + Instant Camera Translate)
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                QuickChipCard(
+                    modifier = Modifier.weight(1f),
+                    title = if (s.isArabic) "ماسح CamScanner" else "CamScanner Pro",
+                    icon = Icons.Default.CameraAlt,
+                    tint = Color(0xFF059669),
+                    onClick = { onOpenTool("cam_scanner") }
+                )
+                QuickChipCard(
+                    modifier = Modifier.weight(1f),
+                    title = if (s.isArabic) "ترجمة بالكاميرا" else "Camera Translate",
+                    icon = Icons.Default.Translate,
+                    tint = Color(0xFF0D9488),
+                    onClick = { onOpenTool("camera_translate") }
+                )
             }
         }
 

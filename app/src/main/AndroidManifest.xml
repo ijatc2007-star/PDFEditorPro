@@ -3,11 +3,18 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!--
-        Google Play Protect & 100% Offline Privacy Hardened:
-        - ZERO runtime/dangerous permissions required (uses Android Storage Access Framework).
-        - ZERO INTERNET permission (strictly offline by design).
+        Google Play Protect & Privacy Hardened v5.0:
+        - INTERNET & ACCESS_NETWORK_STATE are used ONLY over HTTPS (usesCleartextTraffic="false")
+          when the user taps "Download Offline Arabic & English Neural Dictionary Pack".
+          All PDF viewing, editing, OCR, AI Studio, CamScanner, and translation run 100% offline once downloaded.
+        - CAMERA is requested at runtime ONLY when using CamScanner Pro or Live Camera Translator (with Gallery fallback).
+        - ZERO storage permissions required (uses Android Storage Access Framework).
         - Cleartext traffic and ADB backup disabled.
     -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
         android:name=".PdfProApp"
