@@ -3,6 +3,7 @@ package com.ibrahimjaber.pdfpro.ui.navigation
 import android.net.Uri
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Settings
@@ -24,6 +25,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.ibrahimjaber.pdfpro.PdfProApp
 import com.ibrahimjaber.pdfpro.data.LocalStrings
+import com.ibrahimjaber.pdfpro.ui.screens.AiAssistantScreen
 import com.ibrahimjaber.pdfpro.ui.screens.ConverterScreen
 import com.ibrahimjaber.pdfpro.ui.screens.HomeScreen
 import com.ibrahimjaber.pdfpro.ui.screens.PageOrganizerScreen
@@ -35,13 +37,16 @@ import com.ibrahimjaber.pdfpro.ui.screens.ViewerEditorScreen
 object Routes {
     const val LIBRARY = "library"
     const val CONVERTER = "converter"
+    const val AI_STUDIO = "ai_studio"
+    const val AI_STUDIO_FILE = "ai_studio/{path}"
     const val TOOLS = "tools"
     const val SETTINGS = "settings"
-    const val VIEWER = "viewer/{path}"
+    const val VIEWER = "viewer/{path}?page={page}"
     const val ORGANIZER = "organizer/{path}"
     const val TOOL_WORKSPACE = "tool/{toolId}"
 
-    fun viewer(path: String): String = "viewer/${Uri.encode(path)}"
+    fun viewer(path: String, page: Int = -1): String = "viewer/${Uri.encode(path)}?page=$page"
+    fun aiStudioFor(path: String): String = "ai_studio/${Uri.encode(path)}"
     fun organizer(path: String): String = "organizer/${Uri.encode(path)}"
     fun toolWorkspace(toolId: String): String = "tool/$toolId"
 }
@@ -64,7 +69,13 @@ fun PdfProNavHost(
         }
     }
 
-    val showBottomBar = currentRoute in listOf(Routes.LIBRARY, Routes.CONVERTER, Routes.TOOLS, Routes.SETTINGS)
+    val showBottomBar = currentRoute in listOf(
+        Routes.LIBRARY,
+        Routes.CONVERTER,
+        Routes.AI_STUDIO,
+        Routes.TOOLS,
+        Routes.SETTINGS
+    )
 
     Scaffold(
         bottomBar = {
@@ -91,6 +102,17 @@ fun PdfProNavHost(
                         },
                         icon = { Icon(Icons.Default.SwapHoriz, contentDescription = s.navConverter) },
                         label = { Text(s.navConverter) }
+                    )
+                    NavigationBarItem(
+                        selected = currentRoute == Routes.AI_STUDIO,
+                        onClick = {
+                            navController.navigate(Routes.AI_STUDIO) {
+                                popUpTo(Routes.LIBRARY)
+                                launchSingleTop = true
+                            }
+                        },
+                        icon = { Icon(Icons.Default.AutoAwesome, contentDescription = "AI") },
+                        label = { Text(if (s.isArabic) "ذكاء AI" else "AI Studio") }
                     )
                     NavigationBarItem(
                         selected = currentRoute == Routes.TOOLS,
@@ -129,10 +151,10 @@ fun PdfProNavHost(
                     onOpenPdf = { path -> navController.navigate(Routes.viewer(path)) },
                     onOrganizePdf = { path -> navController.navigate(Routes.organizer(path)) },
                     onOpenTool = { toolId ->
-                        if (toolId == "converter") {
-                            navController.navigate(Routes.CONVERTER)
-                        } else {
-                            navController.navigate(Routes.toolWorkspace(toolId))
+                        when (toolId) {
+                            "converter" -> navController.navigate(Routes.CONVERTER)
+                            "ai_studio" -> navController.navigate(Routes.AI_STUDIO)
+                            else -> navController.navigate(Routes.toolWorkspace(toolId))
                         }
                     }
                 )
@@ -145,13 +167,35 @@ fun PdfProNavHost(
                 )
             }
 
+            composable(Routes.AI_STUDIO) {
+                AiAssistantScreen(
+                    app = app,
+                    initialFilePath = null,
+                    onBack = null,
+                    onOpenPdfAtPage = { path, pageIdx -> navController.navigate(Routes.viewer(path, pageIdx)) }
+                )
+            }
+
+            composable(
+                route = Routes.AI_STUDIO_FILE,
+                arguments = listOf(navArgument("path") { type = NavType.StringType })
+            ) { entry ->
+                val decodedPath = Uri.decode(entry.arguments?.getString("path").orEmpty())
+                AiAssistantScreen(
+                    app = app,
+                    initialFilePath = decodedPath,
+                    onBack = { navController.popBackStack() },
+                    onOpenPdfAtPage = { path, pageIdx -> navController.navigate(Routes.viewer(path, pageIdx)) }
+                )
+            }
+
             composable(Routes.TOOLS) {
                 ToolsHubScreen(
                     onSelectTool = { toolId ->
-                        if (toolId == "converter") {
-                            navController.navigate(Routes.CONVERTER)
-                        } else {
-                            navController.navigate(Routes.toolWorkspace(toolId))
+                        when (toolId) {
+                            "converter" -> navController.navigate(Routes.CONVERTER)
+                            "ai_studio" -> navController.navigate(Routes.AI_STUDIO)
+                            else -> navController.navigate(Routes.toolWorkspace(toolId))
                         }
                     }
                 )
@@ -163,14 +207,20 @@ fun PdfProNavHost(
 
             composable(
                 route = Routes.VIEWER,
-                arguments = listOf(navArgument("path") { type = NavType.StringType })
+                arguments = listOf(
+                    navArgument("path") { type = NavType.StringType },
+                    navArgument("page") { type = NavType.IntType; defaultValue = -1 }
+                )
             ) { entry ->
                 val decodedPath = Uri.decode(entry.arguments?.getString("path").orEmpty())
+                val pageArg = entry.arguments?.getInt("page") ?: -1
                 ViewerEditorScreen(
                     app = app,
                     filePath = decodedPath,
+                    initialPageIndex = pageArg,
                     onBack = { navController.popBackStack() },
-                    onOpenOrganizer = { p -> navController.navigate(Routes.organizer(p)) }
+                    onOpenOrganizer = { p -> navController.navigate(Routes.organizer(p)) },
+                    onOpenAiStudio = { p -> navController.navigate(Routes.aiStudioFor(p)) }
                 )
             }
 

@@ -16,6 +16,7 @@ import customtkinter as ctk
 import fitz
 from PIL import Image, ImageDraw, ImageOps, ImageTk
 
+import ai_engine_pc as ai_engine
 import pdf_engine_pc as engine
 from strings_pc import APP_NAME, APP_VERSION, CREDIT_AR, CREDIT_EN, STRINGS
 
@@ -158,11 +159,14 @@ class PdfProStudioApp(ctk.CTk):
         self.btn_nav_converter = ctk.CTkButton(self.sidebar, text=self.t("nav_converter"), anchor="w", command=lambda: self._show_tab("converter"))
         self.btn_nav_converter.grid(row=3, column=0, padx=14, pady=5, sticky="ew")
 
+        self.btn_nav_ai = ctk.CTkButton(self.sidebar, text=self.t("nav_ai"), anchor="w", fg_color="#7C3AED", command=lambda: self._show_tab("ai"))
+        self.btn_nav_ai.grid(row=4, column=0, padx=14, pady=5, sticky="ew")
+
         self.btn_nav_tools = ctk.CTkButton(self.sidebar, text=self.t("nav_tools"), anchor="w", command=lambda: self._show_tab("tools"))
-        self.btn_nav_tools.grid(row=4, column=0, padx=14, pady=5, sticky="ew")
+        self.btn_nav_tools.grid(row=5, column=0, padx=14, pady=5, sticky="ew")
 
         self.btn_nav_about = ctk.CTkButton(self.sidebar, text=self.t("nav_about"), anchor="w", command=lambda: self._show_tab("about"))
-        self.btn_nav_about.grid(row=5, column=0, padx=14, pady=5, sticky="ew")
+        self.btn_nav_about.grid(row=6, column=0, padx=14, pady=5, sticky="ew")
 
         # Language + Theme Controls at bottom of sidebar
         ctrl_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
@@ -190,10 +194,11 @@ class PdfProStudioApp(ctk.CTk):
         self.status_bar = ctk.CTkLabel(self, textvariable=self.status_var, anchor="w", font=ctk.CTkFont(size=11.5), padx=14, height=26)
         self.status_bar.grid(row=1, column=0, columnspan=2, sticky="ew")
 
-        # Build the 4 tab frames
+        # Build the 5 tab frames
         self.tabs: Dict[str, ctk.CTkFrame] = {}
         self._build_viewer_tab()
         self._build_converter_tab()
+        self._build_ai_tab()
         self._build_tools_tab()
         self._build_about_tab()
 
@@ -202,6 +207,7 @@ class PdfProStudioApp(ctk.CTk):
         self.title(f"{self.t('title')} — {self.t('credit')}")
         self.btn_nav_viewer.configure(text=self.t("nav_viewer"))
         self.btn_nav_converter.configure(text=self.t("nav_converter"))
+        self.btn_nav_ai.configure(text=self.t("nav_ai"))
         self.btn_nav_tools.configure(text=self.t("nav_tools"))
         self.btn_nav_about.configure(text=self.t("nav_about"))
         self.btn_lang.configure(text=self.t("lang_switch"))
@@ -233,10 +239,12 @@ class PdfProStudioApp(ctk.CTk):
         top_bar = ctk.CTkFrame(frame, height=48)
         top_bar.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 4))
 
-        ctk.CTkButton(top_bar, text="Open PDF", width=92, command=self._open_pdf_dialog).pack(side="left", padx=4, pady=6)
-        ctk.CTkButton(top_bar, text="Save PDF", width=86, fg_color="#059669", command=lambda: self._save_pdf(False)).pack(side="left", padx=4)
-        ctk.CTkButton(top_bar, text="Save As", width=80, fg_color="#0284C7", command=lambda: self._save_pdf(True)).pack(side="left", padx=4)
-        ctk.CTkButton(top_bar, text="Search", width=74, fg_color="#475569", command=self._search_in_pdf).pack(side="left", padx=4)
+        ctk.CTkButton(top_bar, text="Open PDF", width=86, command=self._open_pdf_dialog).pack(side="left", padx=3, pady=6)
+        ctk.CTkButton(top_bar, text="Save", width=66, fg_color="#059669", command=lambda: self._save_pdf(False)).pack(side="left", padx=3)
+        ctk.CTkButton(top_bar, text="Save As", width=72, fg_color="#0284C7", command=lambda: self._save_pdf(True)).pack(side="left", padx=3)
+        ctk.CTkButton(top_bar, text="Search", width=68, fg_color="#475569", command=self._search_in_pdf).pack(side="left", padx=3)
+        ctk.CTkButton(top_bar, text="Read Aloud", width=88, fg_color="#0D9488", command=self._read_page_aloud).pack(side="left", padx=3)
+        ctk.CTkButton(top_bar, text="AI Studio", width=80, fg_color="#7C3AED", command=self._open_ai_for_current).pack(side="left", padx=3)
 
         ctk.CTkButton(top_bar, text="◀", width=36, command=self._prev_page).pack(side="left", padx=(14, 2))
         self.page_lbl = ctk.CTkLabel(top_bar, text="Page 0 / 0", width=92)
@@ -608,12 +616,13 @@ class PdfProStudioApp(ctk.CTk):
     def _search_in_pdf(self):
         if self.doc is None:
             return
-        q = simpledialog.askstring("Offline Search in PDF", "Enter keyword to find:")
+        q = simpledialog.askstring("Offline Search (EN / Arabic)", "Enter keyword to find (Arabic diacritics tolerant):")
         if not q:
             return
+        needle = ai_engine.normalize_for_search(q)
         hits = []
         for idx, page in enumerate(self.doc):
-            if q.lower() in page.get_text("text").lower():
+            if needle in ai_engine.normalize_for_search(page.get_text("text")):
                 hits.append(idx + 1)
         if hits:
             self.current_page = hits[0] - 1
@@ -621,6 +630,140 @@ class PdfProStudioApp(ctk.CTk):
             messagebox.showinfo("Search Results", f"Found '{q}' on pages: {', '.join(map(str, hits))}\nJumped to page {hits[0]}.")
         else:
             messagebox.showinfo("Search Results", f"No matches found for '{q}'.")
+
+    def _read_page_aloud(self):
+        if self.doc is None:
+            return
+        text = ai_engine.clean_extracted_text(self.doc[self.current_page].get_text("text"))
+        if not text:
+            messagebox.showinfo("Read Aloud", "No selectable text found on this page.")
+            return
+        ok = ai_engine.speak_text_offline_windows(text)
+        if ok:
+            self.status_var.set(f"Reading Page {self.current_page + 1} aloud offline (Windows Speech)...")
+        else:
+            messagebox.showinfo("Read Aloud", "Offline speech synthesis is active on Windows 10/11 PCs.")
+
+    def _open_ai_for_current(self):
+        self._show_tab("ai")
+        if self.doc_path:
+            self._run_ai_analysis(self.doc_path)
+
+    # =========================================================================
+    # TAB 2B: OFFLINE AI PDF STUDIO (ARABIC & ENGLISH)
+    # =========================================================================
+
+    def _build_ai_tab(self):
+        frame = ctk.CTkScrollableFrame(self.main_area, corner_radius=0)
+        self.tabs["ai"] = frame
+        self._ai_pages: List[str] = []
+        self._ai_pdf_path: Optional[str] = None
+        self._ai_last_report: Optional[Dict] = None
+
+        ctk.CTkLabel(frame, text="Offline AI PDF Studio (Arabic & English)", font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", padx=20, pady=(18, 2))
+        ctk.CTkLabel(frame, text=f"AI Summarizer • Ask Your PDF • PII Privacy Audit • Smart Outline • 100% Offline • {CREDIT_EN}", text_color="#38BDF8").pack(anchor="w", padx=20, pady=(0, 12))
+
+        ctrl = ctk.CTkFrame(frame)
+        ctrl.pack(fill="x", padx=20, pady=6)
+        ctk.CTkButton(ctrl, text="Analyze Currently Open PDF", fg_color="#7C3AED", command=lambda: self._run_ai_analysis(self.doc_path)).pack(side="left", padx=8, pady=10)
+        ctk.CTkButton(ctrl, text="Pick Another PDF...", command=self._pick_pdf_for_ai).pack(side="left", padx=6, pady=10)
+        ctk.CTkButton(ctrl, text="Export AI Summary PDF", fg_color="#059669", command=self._export_ai_summary_pdf).pack(side="right", padx=8, pady=10)
+
+        # Ask Your PDF Bar
+        qa_bar = ctk.CTkFrame(frame)
+        qa_bar.pack(fill="x", padx=20, pady=6)
+        self.ai_question_entry = ctk.CTkEntry(qa_bar, placeholder_text="Ask anything about this PDF in English or Arabic (اسأل أي سؤال عن الملف)...")
+        self.ai_question_entry.pack(side="left", fill="x", expand=True, padx=8, pady=10)
+        ctk.CTkButton(qa_bar, text="Ask AI", width=96, fg_color="#0284C7", command=self._ask_ai_question).pack(side="right", padx=8, pady=10)
+
+        self.ai_output_box = ctk.CTkTextbox(frame, height=480, font=ctk.CTkFont(size=13))
+        self.ai_output_box.pack(fill="both", expand=True, padx=20, pady=(6, 16))
+        self.ai_output_box.insert("1.0", "Click 'Analyze Currently Open PDF' to run 100% offline AI Summarization, Arabic/English Analytics, Entity & Action Extraction, PII Redaction Audit, and Smart Outline.\n")
+
+    def _pick_pdf_for_ai(self):
+        p = filedialog.askopenfilename(filetypes=[("PDF Files", "*.pdf")])
+        if p:
+            self._run_ai_analysis(p)
+
+    def _run_ai_analysis(self, pdf_path: Optional[str]):
+        if not pdf_path or not os.path.exists(pdf_path):
+            messagebox.showinfo("AI Studio", "Please open or select a PDF file first.")
+            return
+        try:
+            pages = ai_engine.extract_pages_text(pdf_path, self.doc_password if pdf_path == self.doc_path else None)
+            rep = ai_engine.analyze_document(pages, num_sentences=5)
+            self._ai_pages = pages
+            self._ai_pdf_path = pdf_path
+            self._ai_last_report = rep
+
+            lang = rep["language"]
+            lines = [
+                f"=== AI ANALYSIS: {Path(pdf_path).name} ===",
+                f"Language: {lang['primary']} (AR {lang['arabic_pct']}% / EN {lang['english_pct']}%) | Words: {lang['words']} | ~{lang['read_minutes']} min read",
+                "",
+                "--- AI EXECUTIVE SUMMARY ---",
+            ]
+            for i, b in enumerate(rep["summary"], start=1):
+                lines.append(f"{i}. {b}")
+            if rep["keywords"]:
+                lines.append("\nTop Topics: " + ", ".join(rep["keywords"]))
+            if rep["pii"]:
+                lines.append(f"\n--- PII PRIVACY & REDACTION AUDIT ({len(rep['pii'])} found) ---")
+                for pg, cat, val in rep["pii"]:
+                    lines.append(f"  [!] {pg} — {cat}: {val}")
+            else:
+                lines.append("\n--- PII PRIVACY AUDIT: CLEAN (0 exposed emails/IBANs/cards/IPs) ---")
+            if rep["actions"]:
+                lines.append("\n--- ACTION ITEMS & OBLIGATIONS ---")
+                lines.extend(f"  • {a}" for a in rep["actions"])
+            if rep["amounts"] or rep["dates"]:
+                lines.append("\n--- DATES & AMOUNTS ---")
+                if rep["dates"]:
+                    lines.append("  Dates: " + ", ".join(rep["dates"]))
+                if rep["amounts"]:
+                    lines.append("  Amounts: " + ", ".join(rep["amounts"]))
+            if rep["headings"]:
+                lines.append("\n--- AI SMART OUTLINE ---")
+                for pg, h in rep["headings"]:
+                    lines.append(f"  Page {pg}: {h}")
+
+            self.ai_output_box.delete("1.0", "end")
+            self.ai_output_box.insert("1.0", "\n".join(lines))
+            self.status_var.set(f"AI Analysis complete for {Path(pdf_path).name} — 100% Offline")
+        except Exception as exc:
+            messagebox.showerror("AI Studio Error", str(exc))
+
+    def _ask_ai_question(self):
+        q = self.ai_question_entry.get().strip()
+        if not q:
+            return
+        if not self._ai_pages and self.doc_path:
+            self._run_ai_analysis(self.doc_path)
+        if not self._ai_pages:
+            messagebox.showinfo("Ask AI", "Select or open a PDF first.")
+            return
+        hits = ai_engine.ask_question(self._ai_pages, q)
+        out_lines = [f"\n\n=== Q: {q} ==="]
+        if not hits:
+            out_lines.append("No direct matching passage found. Try different keywords.")
+        else:
+            for pg, rel, txt in hits:
+                out_lines.append(f"  [Page {pg} • {rel}% match] {txt}")
+        self.ai_output_box.insert("1.0", "\n".join(out_lines) + "\n\n")
+        self.ai_question_entry.delete(0, "end")
+
+    def _export_ai_summary_pdf(self):
+        if not self._ai_last_report or not self._ai_pdf_path:
+            messagebox.showinfo("Export Summary", "Run AI Analysis on a PDF first.")
+            return
+        out = filedialog.asksaveasfilename(defaultextension=".pdf", initialfile=f"{Path(self._ai_pdf_path).stem}_AI_Summary.pdf")
+        if not out:
+            return
+        text = self.ai_output_box.get("1.0", "end").strip()
+        engine._render_lines_to_pdf(f"AI Summary — {Path(self._ai_pdf_path).stem}", text.splitlines(), out)
+        self._open_pdf_path(out)
+        self._show_tab("viewer")
+        messagebox.showinfo("Saved", f"Saved AI Summary PDF:\n{out}")
 
     # =========================================================================
     # TAB 2: UNIVERSAL OFFLINE FORMAT CONVERTER

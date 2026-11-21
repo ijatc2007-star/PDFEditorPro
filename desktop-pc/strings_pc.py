@@ -3,19 +3,20 @@ Bilingual English & Arabic (RTL) strings for PDF Pro Studio PC Edition.
 Programmed by Ibrahim Jaber 2026 | برمجة إبراهيم جابر 2026
 """
 
-APP_NAME = "PDF Pro Studio PC"
-APP_VERSION = "2.0.0"
+APP_NAME = "PDF Editor Pro PC"
+APP_VERSION = "3.0.0"
 CREDIT_EN = "Programmed by Ibrahim Jaber 2026"
 CREDIT_AR = "برمجة إبراهيم جابر 2026"
-CREATOR_TAG = "PDF Pro Studio — Programmed by Ibrahim Jaber 2026"
+CREATOR_TAG = "PDF Editor Pro — Programmed by Ibrahim Jaber 2026"
 
 STRINGS = {
     "en": {
-        "title": "PDF Pro Studio PC — Offline Viewer, Pro Editor & Converter",
+        "title": "PDF Editor Pro PC — Offline AI Viewer, Pro Editor & Converter",
         "credit": "Programmed by Ibrahim Jaber 2026",
         "copyright": "© 2026 Ibrahim Jaber. All Rights Reserved. | 100% Offline",
         "nav_viewer": "Viewer & Pro Editor",
         "nav_converter": "Format Converter",
+        "nav_ai": "AI PDF Studio (EN/AR)",
         "nav_tools": "Pro PDF Toolkit (16)",
         "nav_about": "Settings & About",
         "open_pdf": "Open PDF",
@@ -47,6 +48,7 @@ STRINGS = {
         "copyright": "© 2026 إبراهيم جابر. جميع الحقوق محفوظة. | يعمل أوفلاين 100%",
         "nav_viewer": "العارض والمحرر الاحترافي",
         "nav_converter": "محول الصيغ الشامل",
+        "nav_ai": "الذكاء الاصطناعي (AI)",
         "nav_tools": "أدوات PDF الاحترافية (16)",
         "nav_about": "الإعدادات وحول التطبيق",
         "open_pdf": "فتح PDF",

@@ -110,3 +110,28 @@ def test_full_offline_pipeline_and_conversions(tmp_path: Path):
 
     diff = engine.compare_pdfs(sample_pdf, redacted)
     assert "Comparison Report" in diff
+
+
+def test_offline_ai_arabic_and_english_engine():
+    import ai_engine_pc as ai
+
+    norm = ai.normalize_for_search("إبْرَاهِيمُ جَابِر — مَدرَسَةٌ")
+    assert "ابراهيم" in norm and "مدرسه" in norm
+
+    pages = [
+        "1. Contract Summary\nThis contract must be approved before 2026-12-31 for $30,000 USD. Email test@company.com.",
+        "الفصل الثاني: التسليم والدفع\nيجب تسليم العمل النهائي قبل 2026-12-31 بقيمة 50000 ريال سعودي. برمجة إبراهيم جابر 2026.",
+    ]
+    rep = ai.analyze_document(pages, num_sentences=3)
+    assert len(rep["summary"]) >= 1
+    assert "2026-12-31" in rep["dates"]
+    assert len(rep["amounts"]) >= 1
+    assert any(cat == "Email" for _, cat, _ in rep["pii"])
+    assert len(rep["headings"]) >= 1
+
+    hits_en = ai.ask_question(pages, "What is the contract deadline and amount?")
+    assert len(hits_en) >= 1 and hits_en[0][0] == 1
+
+    hits_ar = ai.ask_question(pages, "ما هي قيمة التسليم والدفع؟")
+    assert len(hits_ar) >= 1 and hits_ar[0][0] == 2
+

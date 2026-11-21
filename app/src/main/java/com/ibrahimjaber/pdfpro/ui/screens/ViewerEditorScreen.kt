@@ -134,10 +134,14 @@ import com.ibrahimjaber.pdfpro.data.ReadingMode
 import com.ibrahimjaber.pdfpro.data.SavedSignature
 import com.ibrahimjaber.pdfpro.data.SearchMatch
 import com.ibrahimjaber.pdfpro.data.ShapeKind
+import com.ibrahimjaber.pdfpro.engine.ArabicTextProcessor
+import com.ibrahimjaber.pdfpro.engine.DetectedLanguage
 import com.ibrahimjaber.pdfpro.engine.FileHelper
 import com.ibrahimjaber.pdfpro.engine.PdfPrintHelper
 import com.ibrahimjaber.pdfpro.ui.theme.BrandBlue
 import com.ibrahimjaber.pdfpro.ui.theme.BrandCrimson
+import com.ibrahimjaber.pdfpro.ui.theme.BrandPurple
+import androidx.compose.material.icons.filled.AutoAwesome
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
@@ -177,8 +181,10 @@ private val PRESET_STAMPS = listOf(
 fun ViewerEditorScreen(
     app: PdfProApp,
     filePath: String,
+    initialPageIndex: Int = -1,
     onBack: () -> Unit,
-    onOpenOrganizer: (String) -> Unit
+    onOpenOrganizer: (String) -> Unit,
+    onOpenAiStudio: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -194,7 +200,10 @@ fun ViewerEditorScreen(
 
     var pageCount by remember { mutableIntStateOf(0) }
     var currentPage by remember {
-        mutableIntStateOf(app.repository.getDocumentByPath(filePath)?.lastPageIndex ?: 0)
+        mutableIntStateOf(
+            if (initialPageIndex >= 0) initialPageIndex
+            else app.repository.getDocumentByPath(filePath)?.lastPageIndex ?: 0
+        )
     }
     var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isLoading by remember { mutableStateOf(true) }
@@ -208,6 +217,8 @@ fun ViewerEditorScreen(
     var readingMode by remember { mutableStateOf(settings.defaultReadingMode) }
     var zoomScale by remember { mutableFloatStateOf(1f) }
     var panOffset by remember { mutableStateOf(Offset.Zero) }
+    var ttsSpeed by remember { mutableFloatStateOf(1.0f) }
+    var reflowFontSizeSp by remember { mutableFloatStateOf(16f) }
 
     // Editor state
     var editMode by remember { mutableStateOf(false) }
@@ -256,7 +267,7 @@ fun ViewerEditorScreen(
     var pendingTextTap by remember { mutableStateOf<NormPoint?>(null) }
     var pendingNoteTap by remember { mutableStateOf<NormPoint?>(null) }
 
-    // Offline Text-to-Speech
+    // Offline Bilingual Text-to-Speech (Arabic & English auto-detection)
     var isSpeaking by remember { mutableStateOf(false) }
     var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
 
@@ -392,6 +403,13 @@ fun ViewerEditorScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { onOpenAiStudio(filePath) }) {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = "Offline AI Studio",
+                            tint = BrandPurple
+                        )
+                    }
                     IconButton(onClick = { showSearchDialog = true }) {
                         Icon(Icons.Default.Search, contentDescription = "Search in PDF")
                     }
@@ -416,7 +434,12 @@ fun ViewerEditorScreen(
                         }
                         DropdownMenu(expanded = showOverflowMenu, onDismissRequest = { showOverflowMenu = false }) {
                             DropdownMenuItem(
-                                text = { Text("Reading Mode: ${readingMode.label}") },
+                                text = { Text(if (strings.isArabic) "الذكاء الاصطناعي للملف (AI)" else "AI Summary, Q&A & PII Scan") },
+                                leadingIcon = { Icon(Icons.Default.AutoAwesome, null, tint = BrandPurple) },
+                                onClick = { showOverflowMenu = false; onOpenAiStudio(filePath) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Reading Mode: ${if (strings.isArabic) readingMode.labelAr else readingMode.label}") },
                                 leadingIcon = { Icon(Icons.Default.DarkMode, null) },
                                 onClick = {
                                     showOverflowMenu = false
@@ -448,7 +471,15 @@ fun ViewerEditorScreen(
                                 onClick = { showOverflowMenu = false; showBookmarksDialog = true }
                             )
                             DropdownMenuItem(
-                                text = { Text(if (isSpeaking) "Stop Read Aloud" else "Read Page Aloud (TTS)") },
+                                text = {
+                                    Text(
+                                        if (isSpeaking) {
+                                            if (strings.isArabic) "إيقاف القراءة الصوتية" else "Stop Read Aloud"
+                                        } else {
+                                            if (strings.isArabic) "قراءة صوتية ذكية (عربي/إنجليزي) ${ttsSpeed}x" else "Read Aloud Auto (AR/EN) ${ttsSpeed}x"
+                                        }
+                                    )
+                                },
                                 leadingIcon = {
                                     Icon(
                                         if (isSpeaking) Icons.Default.StopCircle else Icons.Default.RecordVoiceOver,
@@ -468,15 +499,41 @@ fun ViewerEditorScreen(
                                             if (text.isBlank()) {
                                                 Toast.makeText(context, "No selectable text on this page", Toast.LENGTH_SHORT).show()
                                             } else {
+                                                val stats = ArabicTextProcessor.analyzeLanguage(text)
+                                                val targetLocale = if (stats.primary == DetectedLanguage.ARABIC || stats.arabicPercent >= 35) {
+                                                    Locale("ar")
+                                                } else {
+                                                    Locale.US
+                                                }
+                                                ttsEngine?.language = targetLocale
+                                                ttsEngine?.setSpeechRate(ttsSpeed)
+                                                val chunks = ArabicTextProcessor.chunkForTts(text)
                                                 isSpeaking = true
-                                                ttsEngine?.speak(text.take(3500), TextToSpeech.QUEUE_FLUSH, null, "pdf_page")
+                                                chunks.forEachIndexed { idx, chunk ->
+                                                    val mode = if (idx == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                                                    ttsEngine?.speak(chunk, mode, null, "pdf_p${currentPage}_$idx")
+                                                }
+                                                Toast.makeText(
+                                                    context,
+                                                    "Reading (${targetLocale.language.uppercase()} • ${ttsSpeed}x)",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
                                             }
                                         }
                                     }
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("Extract Page Text") },
+                                text = { Text(if (strings.isArabic) "سرعة القراءة الصوتية: ${ttsSpeed}x" else "TTS Speed: ${ttsSpeed}x (Tap to change)") },
+                                leadingIcon = { Icon(Icons.Default.RecordVoiceOver, null) },
+                                onClick = {
+                                    val speeds = listOf(0.75f, 1.0f, 1.25f, 1.5f)
+                                    ttsSpeed = speeds[(speeds.indexOf(ttsSpeed) + 1) % speeds.size]
+                                    ttsEngine?.setSpeechRate(ttsSpeed)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (strings.isArabic) "وضع القراءة النصية المريحة (عربي/إنجليزي)" else "Clean Reflow Reader & Extract Text") },
                                 leadingIcon = { Icon(Icons.Default.TextFields, null) },
                                 onClick = {
                                     showOverflowMenu = false
@@ -1595,18 +1652,44 @@ fun ViewerEditorScreen(
         )
     }
 
-    // Extract Page Text Dialog
+    // Bilingual Reflow Reader & Extract Page Text Dialog (Arabic & English)
     if (showExtractTextDialog) {
+        val pageLang = remember(extractedPageText) { ArabicTextProcessor.analyzeLanguage(extractedPageText) }
         AlertDialog(
             onDismissRequest = { showExtractTextDialog = false },
-            title = { Text("Page ${currentPage + 1} Extracted Text") },
+            title = {
+                Column {
+                    Text(if (strings.isArabic) "القارئ النصي المريح — صفحة ${currentPage + 1}" else "Clean Reflow Reader — Page ${currentPage + 1}")
+                    Text(
+                        text = "${if (strings.isArabic) pageLang.primary.labelAr else pageLang.primary.labelEn} • ${pageLang.wordCount} words",
+                        fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
             text = {
-                Column(
-                    modifier = Modifier
-                        .height(280.dp)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    Text(extractedPageText.ifBlank { "No selectable text found on this page." }, fontSize = 13.sp)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("A-", fontSize = 12.sp)
+                        Slider(
+                            value = reflowFontSizeSp,
+                            onValueChange = { reflowFontSizeSp = it },
+                            valueRange = 12f..26f,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text("A+", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    }
+                    Column(
+                        modifier = Modifier
+                            .height(290.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Text(
+                            text = extractedPageText.ifBlank { "No selectable text found on this page." },
+                            fontSize = reflowFontSizeSp.sp,
+                            lineHeight = (reflowFontSizeSp * 1.48f).sp
+                        )
+                    }
                 }
             },
             confirmButton = {

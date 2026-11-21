@@ -717,7 +717,7 @@ class PdfEngine(private val context: Context) {
     }
 
     /**
-     * Extracts text from a single page (0-based) or the entire PDF offline.
+     * Extracts normalized Arabic/English text from a single page (0-based) or the entire PDF offline.
      */
     suspend fun extractText(
         inputFile: File,
@@ -730,41 +730,40 @@ class PdfEngine(private val context: Context) {
                 stripper.startPage = pageIndex + 1
                 stripper.endPage = pageIndex + 1
             }
-            stripper.getText(doc).trim()
+            ArabicTextProcessor.cleanExtractedText(stripper.getText(doc))
         }
     }
 
     /**
-     * Searches for a keyword across all pages of a PDF offline and returns page hits & snippets.
+     * Searches for an Arabic or English keyword across all pages offline (diacritic & Hamza-tolerant).
      */
     suspend fun searchText(
         inputFile: File,
         query: String,
         password: String? = null
     ): List<SearchMatch> = withContext(Dispatchers.IO) {
-        val needle = query.trim()
-        if (needle.isEmpty()) return@withContext emptyList()
+        val normNeedle = ArabicTextProcessor.normalizeForSearch(query).trim()
+        if (normNeedle.isEmpty()) return@withContext emptyList()
         val matches = mutableListOf<SearchMatch>()
         PDDocument.load(inputFile, password ?: "").use { doc ->
             val stripper = PDFTextStripper()
             for (i in 0 until doc.numberOfPages) {
                 stripper.startPage = i + 1
                 stripper.endPage = i + 1
-                val pageText = stripper.getText(doc)
-                val lower = pageText.lowercase()
-                val lowerNeedle = needle.lowercase()
+                val cleanPage = ArabicTextProcessor.cleanExtractedText(stripper.getText(doc))
+                val normPage = ArabicTextProcessor.normalizeForSearch(cleanPage)
                 var count = 0
-                var pos = lower.indexOf(lowerNeedle)
+                var pos = normPage.indexOf(normNeedle)
                 var firstPos = -1
                 while (pos >= 0) {
                     if (firstPos == -1) firstPos = pos
                     count++
-                    pos = lower.indexOf(lowerNeedle, pos + lowerNeedle.length)
+                    pos = normPage.indexOf(normNeedle, pos + normNeedle.length)
                 }
                 if (count > 0 && firstPos >= 0) {
-                    val start = (firstPos - 35).coerceAtLeast(0)
-                    val end = (firstPos + needle.length + 55).coerceAtMost(pageText.length)
-                    val snippet = pageText.substring(start, end)
+                    val start = (firstPos - 35).coerceAtLeast(0).coerceAtMost(cleanPage.length)
+                    val end = (firstPos + normNeedle.length + 60).coerceAtMost(cleanPage.length)
+                    val snippet = cleanPage.substring(start, end)
                         .replace(Regex("\\s+"), " ")
                         .trim()
                     matches.add(SearchMatch(pageIndex = i, snippet = "...$snippet...", matchCount = count))
