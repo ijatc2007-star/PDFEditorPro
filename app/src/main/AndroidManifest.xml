@@ -2,23 +2,25 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 100% Offline App: No INTERNET permission requested -->
-    <uses-permission
-        android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!--
+        Google Play Protect & 100% Offline Privacy Hardened:
+        - ZERO runtime/dangerous permissions required (uses Android Storage Access Framework).
+        - ZERO INTERNET permission (strictly offline by design).
+        - Cleartext traffic and ADB backup disabled.
+    -->
 
     <application
         android:name=".PdfProApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="@xml/backup_rules"
+        android:fullBackupContent="false"
         android:icon="@drawable/ic_app_launcher"
         android:label="@string/app_name"
         android:largeHeap="true"
         android:roundIcon="@drawable/ic_app_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.PDFProStudio"
+        android:usesCleartextTraffic="false"
         tools:targetApi="35">
 
         <activity
@@ -43,7 +45,7 @@
                 <data android:mimeType="application/pdf" />
             </intent-filter>
 
-            <!-- Share PDF, Word, Excel, PowerPoint, CSV, Text, or Image directly into PDF Pro Studio -->
+            <!-- Share PDF, Word, Excel, PowerPoint, CSV, Text, or Image directly into PDF Editor Pro -->
             <intent-filter android:label="@string/share_to_pdf_pro">
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />

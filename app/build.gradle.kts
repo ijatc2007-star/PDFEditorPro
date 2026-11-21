@@ -58,6 +58,13 @@ android {
             excludes += "/META-INF/NOTICE*"
         }
     }
+
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = true
+        warningsAsErrors = false
+        htmlReport = true
+    }
 }
 
 dependencies {

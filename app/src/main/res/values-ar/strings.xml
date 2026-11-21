@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">PDF Pro Studio</string>
-    <string name="open_with_pdf_pro">فتح بواسطة PDF Pro Studio</string>
-    <string name="share_to_pdf_pro">تحرير / تحويل في PDF Pro Studio</string>
+    <string name="app_name">PDF Editor Pro</string>
+    <string name="open_with_pdf_pro">فتح بواسطة PDF Editor Pro</string>
+    <string name="share_to_pdf_pro">تحرير / تحويل في PDF Editor Pro</string>
     <string name="convert_images_to_pdf">تحويل الصور إلى PDF</string>
     <string name="developer_credit">برمجة إبراهيم جابر 2026</string>
 </resources>
