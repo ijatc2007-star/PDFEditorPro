@@ -4,7 +4,7 @@ Programmed by Ibrahim Jaber 2026 | برمجة إبراهيم جابر 2026
 """
 
 APP_NAME = "PDF Editor Pro PC"
-APP_VERSION = "3.0.0"
+APP_VERSION = "4.0.0"
 CREDIT_EN = "Programmed by Ibrahim Jaber 2026"
 CREDIT_AR = "برمجة إبراهيم جابر 2026"
 CREATOR_TAG = "PDF Editor Pro — Programmed by Ibrahim Jaber 2026"

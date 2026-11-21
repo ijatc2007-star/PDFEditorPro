@@ -135,3 +135,42 @@ def test_offline_ai_arabic_and_english_engine():
     hits_ar = ai.ask_question(pages, "ما هي قيمة التسليم والدفع؟")
     assert len(hits_ar) >= 1 and hits_ar[0][0] == 2
 
+
+def test_v4_flagship_engines(tmp_path: Path):
+    import v4_engines_pc as v4
+
+    # 1. Offline EN <-> AR Translation + Flashcards + Reply + GGUF validator
+    ar_txt = v4.translate_offline("Executive Summary: This contract must be approved before deadline.", "en_to_ar")
+    assert "الملخص التنفيذي" in ar_txt and "يجب" in ar_txt
+    en_txt = v4.translate_offline("الملخص التنفيذي: يجب اعتماد التقرير النهائي", "ar_to_en")
+    assert "executive summary" in en_txt.lower()
+
+    cards = v4.generate_study_flashcards(["1. Security\nAll documents must be encrypted before 2026-12-31."])
+    assert len(cards) >= 1
+
+    gguf = tmp_path / "demo.gguf"
+    gguf.write_bytes(b"GGUF\x03\x00\x00\x00\x00")
+    info = v4.inspect_gguf_model(str(gguf))
+    assert info["valid"] is True and info["version"] == 3
+
+    # 2. Interactive AcroForm create, read, fill & flatten
+    form_pdf = str(tmp_path / "sample_form.pdf")
+    filled_pdf = str(tmp_path / "filled_form.pdf")
+    v4.create_sample_interactive_form(form_pdf)
+    fields = v4.read_form_fields(form_pdf)
+    assert len(fields) >= 4
+    v4.fill_and_save_form(form_pdf, filled_pdf, {"full_name": "Ibrahim Jaber 2026"}, {"approved": True}, flatten=True)
+    assert os.path.getsize(filled_pdf) > 0
+
+    # 3. Cryptographic X.509 PKCS#12 Cert Generation & PDF Signing
+    p12 = str(tmp_path / "ibrahim.p12")
+    signed_pdf = str(tmp_path / "signed.pdf")
+    v4.generate_x509_p12(p12, "Ibrahim Jaber", "PDF Editor Pro 2026", "2026")
+    sig_info = v4.sign_pdf_with_x509(form_pdf, signed_pdf, p12, "2026")
+    assert sig_info["signer"] == "Ibrahim Jaber" and os.path.getsize(signed_pdf) > 0
+
+    # 4. Offline OCR pipeline (with graceful fallback when tessdata is absent in test env)
+    texts, out_ocr = v4.ocr_scanned_pdf(form_pdf, language="eng", output_searchable_pdf=str(tmp_path / "ocr.pdf"))
+    assert len(texts) == 1 and out_ocr and os.path.getsize(out_ocr) > 0
+
+

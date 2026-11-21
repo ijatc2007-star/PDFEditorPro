@@ -1,4 +1,4 @@
-name: Build & Security Scan (Android APK + Windows EXE)
+name: Build & Security Scan (Android APK + AAB + Windows EXE)
 
 on:
   push:
@@ -9,11 +9,18 @@ on:
 
 jobs:
   build-android-apk:
-    name: Build & Scan Android APK
+    name: Build & Scan Android APK + Play AAB
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Download Offline Arabic & English Tesseract OCR Models (tessdata_fast)
+        run: |
+          mkdir -p app/src/main/assets/tessdata
+          curl -fsSL -o app/src/main/assets/tessdata/eng.traineddata https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata
+          curl -fsSL -o app/src/main/assets/tessdata/ara.traineddata https://github.com/tesseract-ocr/tessdata_fast/raw/main/ara.traineddata
+          ls -lh app/src/main/assets/tessdata
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -26,6 +33,14 @@ jobs:
         with:
           gradle-version: 8.9
 
+      - name: Decode Optional Play Store Upload Keystore
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > release-keystore.jks
+          echo "KEYSTORE_FILE=$PWD/release-keystore.jks" >> $GITHUB_ENV
+
       - name: Run Android Unit Tests
         run: gradle testDebugUnitTest
 
@@ -35,11 +50,24 @@ jobs:
       - name: Build Android Debug APK
         run: gradle assembleDebug
 
+      - name: Build Google Play Release AAB Bundle
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: gradle bundleRelease
+
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PDFEditorPro-IbrahimJaber2026-Android-APK
+          name: PDFEditorPro-v4.0-IbrahimJaber2026-Android-APK
           path: app/build/outputs/apk/debug/*.apk
+
+      - name: Upload Google Play Release AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDFEditorPro-v4.0-IbrahimJaber2026-PlayStore-AAB
+          path: app/build/outputs/bundle/release/*.aab
 
       - name: Upload Security Lint Report
         if: always()
@@ -49,11 +77,18 @@ jobs:
           path: app/build/reports/lint-results-debug.html
 
   build-windows-exe:
-    name: Build Windows PC EXE
+    name: Build Windows PC EXE (with Offline AR/EN OCR)
     runs-on: windows-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Download Offline Arabic & English Tesseract OCR Models (tessdata_fast)
+        run: |
+          New-Item -ItemType Directory -Force -Path desktop-pc/tessdata | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata" -OutFile "desktop-pc/tessdata/eng.traineddata"
+          Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/ara.traineddata" -OutFile "desktop-pc/tessdata/ara.traineddata"
+          Get-ChildItem desktop-pc/tessdata
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -68,11 +103,12 @@ jobs:
       - name: Run PC Engine Unit Tests
         run: pytest desktop-pc/test_pc_engine.py -v
 
-      - name: Compile Standalone Windows EXE
+      - name: Compile Standalone Windows EXE (Bundled AR/EN Tessdata)
         run: |
           pyinstaller --noconfirm --onefile --windowed `
-            --name "PDFEditorPro-PC-IbrahimJaber2026" `
+            --name "PDFEditorPro-v4.0-PC-IbrahimJaber2026" `
             --paths desktop-pc `
+            --add-data "desktop-pc/tessdata;tessdata" `
             --collect-all customtkinter `
             --collect-all arabic_reshaper `
             --collect-all bidi `
@@ -81,5 +117,5 @@ jobs:
       - name: Upload Windows EXE Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PDFEditorPro-PC-IbrahimJaber2026-Windows-EXE
-          path: dist/PDFEditorPro-PC-IbrahimJaber2026.exe
+          name: PDFEditorPro-v4.0-PC-IbrahimJaber2026-Windows-EXE
+          path: dist/PDFEditorPro-v4.0-PC-IbrahimJaber2026.exe

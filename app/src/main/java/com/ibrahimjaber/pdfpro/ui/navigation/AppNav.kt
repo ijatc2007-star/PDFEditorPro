@@ -27,7 +27,10 @@ import com.ibrahimjaber.pdfpro.PdfProApp
 import com.ibrahimjaber.pdfpro.data.LocalStrings
 import com.ibrahimjaber.pdfpro.ui.screens.AiAssistantScreen
 import com.ibrahimjaber.pdfpro.ui.screens.ConverterScreen
+import com.ibrahimjaber.pdfpro.ui.screens.DigitalSignatureScreen
+import com.ibrahimjaber.pdfpro.ui.screens.FormFillerScreen
 import com.ibrahimjaber.pdfpro.ui.screens.HomeScreen
+import com.ibrahimjaber.pdfpro.ui.screens.OcrStudioScreen
 import com.ibrahimjaber.pdfpro.ui.screens.PageOrganizerScreen
 import com.ibrahimjaber.pdfpro.ui.screens.ProToolWorkspaceScreen
 import com.ibrahimjaber.pdfpro.ui.screens.SettingsAboutScreen
@@ -39,6 +42,9 @@ object Routes {
     const val CONVERTER = "converter"
     const val AI_STUDIO = "ai_studio"
     const val AI_STUDIO_FILE = "ai_studio/{path}"
+    const val OCR_STUDIO = "ocr_studio?path={path}"
+    const val FORM_FILLER = "form_filler?path={path}"
+    const val DIGITAL_SIGN = "digital_sign"
     const val TOOLS = "tools"
     const val SETTINGS = "settings"
     const val VIEWER = "viewer/{path}?page={page}"
@@ -47,6 +53,8 @@ object Routes {
 
     fun viewer(path: String, page: Int = -1): String = "viewer/${Uri.encode(path)}?page=$page"
     fun aiStudioFor(path: String): String = "ai_studio/${Uri.encode(path)}"
+    fun ocrFor(path: String = ""): String = "ocr_studio?path=${Uri.encode(path)}"
+    fun formFor(path: String = ""): String = "form_filler?path=${Uri.encode(path)}"
     fun organizer(path: String): String = "organizer/${Uri.encode(path)}"
     fun toolWorkspace(toolId: String): String = "tool/$toolId"
 }
@@ -76,6 +84,17 @@ fun PdfProNavHost(
         Routes.TOOLS,
         Routes.SETTINGS
     )
+
+    fun routeToTool(toolId: String) {
+        when (toolId) {
+            "converter" -> navController.navigate(Routes.CONVERTER)
+            "ai_studio" -> navController.navigate(Routes.AI_STUDIO)
+            "ocr_studio" -> navController.navigate(Routes.ocrFor())
+            "form_filler" -> navController.navigate(Routes.formFor())
+            "digital_sign" -> navController.navigate(Routes.DIGITAL_SIGN)
+            else -> navController.navigate(Routes.toolWorkspace(toolId))
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -150,13 +169,7 @@ fun PdfProNavHost(
                     app = app,
                     onOpenPdf = { path -> navController.navigate(Routes.viewer(path)) },
                     onOrganizePdf = { path -> navController.navigate(Routes.organizer(path)) },
-                    onOpenTool = { toolId ->
-                        when (toolId) {
-                            "converter" -> navController.navigate(Routes.CONVERTER)
-                            "ai_studio" -> navController.navigate(Routes.AI_STUDIO)
-                            else -> navController.navigate(Routes.toolWorkspace(toolId))
-                        }
-                    }
+                    onOpenTool = { routeToTool(it) }
                 )
             }
 
@@ -189,16 +202,42 @@ fun PdfProNavHost(
                 )
             }
 
-            composable(Routes.TOOLS) {
-                ToolsHubScreen(
-                    onSelectTool = { toolId ->
-                        when (toolId) {
-                            "converter" -> navController.navigate(Routes.CONVERTER)
-                            "ai_studio" -> navController.navigate(Routes.AI_STUDIO)
-                            else -> navController.navigate(Routes.toolWorkspace(toolId))
-                        }
-                    }
+            composable(
+                route = Routes.OCR_STUDIO,
+                arguments = listOf(navArgument("path") { type = NavType.StringType; defaultValue = "" })
+            ) { entry ->
+                val decoded = Uri.decode(entry.arguments?.getString("path").orEmpty())
+                OcrStudioScreen(
+                    app = app,
+                    initialPath = decoded.ifBlank { null },
+                    onBack = { navController.popBackStack() },
+                    onOpenPdf = { path -> navController.navigate(Routes.viewer(path)) }
                 )
+            }
+
+            composable(
+                route = Routes.FORM_FILLER,
+                arguments = listOf(navArgument("path") { type = NavType.StringType; defaultValue = "" })
+            ) { entry ->
+                val decoded = Uri.decode(entry.arguments?.getString("path").orEmpty())
+                FormFillerScreen(
+                    app = app,
+                    initialPath = decoded.ifBlank { null },
+                    onBack = { navController.popBackStack() },
+                    onOpenPdf = { path -> navController.navigate(Routes.viewer(path)) }
+                )
+            }
+
+            composable(Routes.DIGITAL_SIGN) {
+                DigitalSignatureScreen(
+                    app = app,
+                    onBack = { navController.popBackStack() },
+                    onOpenPdf = { path -> navController.navigate(Routes.viewer(path)) }
+                )
+            }
+
+            composable(Routes.TOOLS) {
+                ToolsHubScreen(onSelectTool = { routeToTool(it) })
             }
 
             composable(Routes.SETTINGS) {
@@ -220,7 +259,14 @@ fun PdfProNavHost(
                     initialPageIndex = pageArg,
                     onBack = { navController.popBackStack() },
                     onOpenOrganizer = { p -> navController.navigate(Routes.organizer(p)) },
-                    onOpenAiStudio = { p -> navController.navigate(Routes.aiStudioFor(p)) }
+                    onOpenAiStudio = { p -> navController.navigate(Routes.aiStudioFor(p)) },
+                    onOpenFormFiller = { p -> navController.navigate(Routes.formFor(p)) },
+                    onOpenOcr = { p -> navController.navigate(Routes.ocrFor(p)) },
+                    onSwitchDocument = { p ->
+                        navController.navigate(Routes.viewer(p)) {
+                            popUpTo(Routes.LIBRARY)
+                        }
+                    }
                 )
             }
 

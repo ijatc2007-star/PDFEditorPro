@@ -184,12 +184,16 @@ fun ViewerEditorScreen(
     initialPageIndex: Int = -1,
     onBack: () -> Unit,
     onOpenOrganizer: (String) -> Unit,
-    onOpenAiStudio: (String) -> Unit = {}
+    onOpenAiStudio: (String) -> Unit = {},
+    onOpenFormFiller: (String) -> Unit = {},
+    onOpenOcr: (String) -> Unit = {},
+    onSwitchDocument: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val strings = LocalStrings.current
     val settings by app.repository.settings.collectAsState()
+    val allDocuments by app.repository.documents.collectAsState()
     val allBookmarks by app.repository.bookmarks.collectAsState()
     val savedSignatures by app.repository.signatures.collectAsState()
 
@@ -213,8 +217,9 @@ fun ViewerEditorScreen(
     var needsPassword by remember { mutableStateOf(false) }
     var renderVersion by remember { mutableIntStateOf(0) }
 
-    // Reading controls
+    // Reading controls (v4.0: Continuous Vertical Scroll + Multi-Tab switcher)
     var readingMode by remember { mutableStateOf(settings.defaultReadingMode) }
+    var continuousScroll by remember { mutableStateOf(true) }
     var zoomScale by remember { mutableFloatStateOf(1f) }
     var panOffset by remember { mutableStateOf(Offset.Zero) }
     var ttsSpeed by remember { mutableFloatStateOf(1.0f) }
@@ -434,9 +439,32 @@ fun ViewerEditorScreen(
                         }
                         DropdownMenu(expanded = showOverflowMenu, onDismissRequest = { showOverflowMenu = false }) {
                             DropdownMenuItem(
-                                text = { Text(if (strings.isArabic) "الذكاء الاصطناعي للملف (AI)" else "AI Summary, Q&A & PII Scan") },
+                                text = { Text(if (strings.isArabic) "الذكاء الاصطناعي والترجمة (AI)" else "AI Summary, Translate & Q&A") },
                                 leadingIcon = { Icon(Icons.Default.AutoAwesome, null, tint = BrandPurple) },
                                 onClick = { showOverflowMenu = false; onOpenAiStudio(filePath) }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (continuousScroll) {
+                                            if (strings.isArabic) "التمرير المستمر: مفعّل (التبديل لصفحة واحدة)" else "Scroll: Continuous (Tap for Single Page)"
+                                        } else {
+                                            if (strings.isArabic) "صفحة واحدة (التبديل للتمرير المستمر)" else "Scroll: Single Page (Tap for Continuous)"
+                                        }
+                                    )
+                                },
+                                leadingIcon = { Icon(Icons.Default.GridView, null) },
+                                onClick = { showOverflowMenu = false; continuousScroll = !continuousScroll }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (strings.isArabic) "تعبئة حقول النموذج (AcroForm)" else "Fill Interactive PDF Form") },
+                                leadingIcon = { Icon(Icons.Default.Edit, null, tint = BrandBlue) },
+                                onClick = { showOverflowMenu = false; onOpenFormFiller(filePath) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (strings.isArabic) "التعرف الضوئي OCR للمسح الضوئي" else "Run Offline Arabic/EN OCR") },
+                                leadingIcon = { Icon(Icons.Default.TextFields, null, tint = BrandCrimson) },
+                                onClick = { showOverflowMenu = false; onOpenOcr(filePath) }
                             )
                             DropdownMenuItem(
                                 text = { Text("Reading Mode: ${if (strings.isArabic) readingMode.labelAr else readingMode.label}") },
@@ -725,7 +753,7 @@ fun ViewerEditorScreen(
             }
         }
     ) { padding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
@@ -735,9 +763,43 @@ fun ViewerEditorScreen(
                         ReadingMode.SEPIA -> Color(0xFFE7DEC8)
                         ReadingMode.DAY -> Color(0xFFCBD5E1)
                     }
-                ),
-            contentAlignment = Alignment.Center
+                )
         ) {
+            // Multi-Tab Open Documents Switcher Strip
+            if (allDocuments.size > 1) {
+                Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        allDocuments.take(6).forEach { tabDoc ->
+                            val isCurrent = tabDoc.path == filePath
+                            FilterChip(
+                                selected = isCurrent,
+                                onClick = { if (!isCurrent) onSwitchDocument(tabDoc.path) },
+                                label = {
+                                    Text(
+                                        text = tabDoc.name.removeSuffix(".pdf").take(18),
+                                        fontSize = 11.sp,
+                                        maxLines = 1
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
             when {
                 isLoading || isSaving -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -753,6 +815,70 @@ fun ViewerEditorScreen(
                         color = BrandCrimson,
                         modifier = Modifier.padding(24.dp)
                     )
+                }
+
+                continuousScroll && !editMode && pageCount > 1 -> {
+                    // Continuous Vertical Scroll Book Reading Mode (lazy per-page rendering)
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(Unit) {
+                                detectTransformGestures { _, pan, zoom, _ ->
+                                    val nextZoom = (zoomScale * zoom).coerceIn(1f, 4f)
+                                    zoomScale = nextZoom
+                                    panOffset = if (nextZoom > 1f) Offset(panOffset.x + pan.x, 0f) else Offset.Zero
+                                }
+                            },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp, horizontal = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(pageCount) { pIdx ->
+                            var itemBmp by remember(filePath, pIdx, renderVersion) { mutableStateOf<Bitmap?>(null) }
+                            LaunchedEffect(filePath, pIdx, renderVersion) {
+                                itemBmp = app.renderManager.renderPage(pIdx, targetWidthPx = 1280, cacheTag = "scroll")
+                            }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { currentPage = pIdx },
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                val loaded = itemBmp
+                                if (loaded != null) {
+                                    val aspect = loaded.width.toFloat() / loaded.height.toFloat().coerceAtLeast(1f)
+                                    Image(
+                                        bitmap = loaded.asImageBitmap(),
+                                        contentDescription = "Page ${pIdx + 1}",
+                                        contentScale = ContentScale.FillBounds,
+                                        colorFilter = pageColorFilter,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .aspectRatio(aspect)
+                                            .graphicsLayer(scaleX = zoomScale, scaleY = zoomScale, translationX = panOffset.x)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color.White)
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(420.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color.White),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(modifier = Modifier.size(26.dp))
+                                    }
+                                }
+                                Text(
+                                    text = "${pIdx + 1} / $pageCount",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 pageBitmap != null -> {
@@ -1252,6 +1378,7 @@ fun ViewerEditorScreen(
                         }
                     }
                 }
+            }
             }
         }
     }

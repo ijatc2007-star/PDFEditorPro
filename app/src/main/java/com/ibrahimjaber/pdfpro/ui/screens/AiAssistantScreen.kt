@@ -51,6 +51,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -86,8 +87,11 @@ import com.ibrahimjaber.pdfpro.data.PdfDocumentItem
 import com.ibrahimjaber.pdfpro.engine.AiDocumentReport
 import com.ibrahimjaber.pdfpro.engine.AiQaResponse
 import com.ibrahimjaber.pdfpro.engine.FileHelper
+import com.ibrahimjaber.pdfpro.engine.LocalGgufModelInfo
 import com.ibrahimjaber.pdfpro.engine.OfflineAiPdfEngine
+import com.ibrahimjaber.pdfpro.engine.OfflineTranslatorEngine
 import com.ibrahimjaber.pdfpro.engine.SummaryDepth
+import com.ibrahimjaber.pdfpro.engine.TranslationDirection
 import com.ibrahimjaber.pdfpro.ui.theme.BrandBlue
 import com.ibrahimjaber.pdfpro.ui.theme.BrandCrimson
 import com.ibrahimjaber.pdfpro.ui.theme.BrandEmerald
@@ -127,6 +131,25 @@ fun AiAssistantScreen(
     // Chat Q&A state
     var questionInput by remember { mutableStateOf("") }
     val qaHistory = remember { mutableStateListOf<AiQaResponse>() }
+
+    // Translate & On-Device GenAI state
+    var translateDir by remember { mutableStateOf(TranslationDirection.AUTO) }
+    var translatedPreview by remember { mutableStateOf("") }
+    var generatedReply by remember { mutableStateOf("") }
+    var ggufInfo by remember { mutableStateOf<LocalGgufModelInfo?>(null) }
+
+    val pickGgufLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                val cached = FileHelper.copyAnyFileFromUriToCache(context, uri)
+                if (cached != null) {
+                    ggufInfo = OfflineTranslatorEngine.inspectLocalGgufModel(cached)
+                }
+            }
+        }
+    }
 
     val pickPdfLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -262,13 +285,14 @@ fun AiAssistantScreen(
                 }
             }
 
-            // 4 AI Mode Tabs
+            // 5 AI Mode Tabs
             item {
-                TabRow(selectedTabIndex = activeTab) {
+                ScrollableTabRow(selectedTabIndex = activeTab, edgePadding = 4.dp) {
                     Tab(selected = activeTab == 0, onClick = { activeTab = 0 }, text = { Text(if (s.isArabic) "ملخص AI" else "Summary", fontSize = 12.sp) })
-                    Tab(selected = activeTab == 1, onClick = { activeTab = 1 }, text = { Text(if (s.isArabic) "اسأل الملف" else "Ask PDF", fontSize = 12.sp) })
-                    Tab(selected = activeTab == 2, onClick = { activeTab = 2 }, text = { Text(if (s.isArabic) "بيانات/PII" else "Insights", fontSize = 12.sp) })
-                    Tab(selected = activeTab == 3, onClick = { activeTab = 3 }, text = { Text(if (s.isArabic) "فهرس ذكي" else "Outline", fontSize = 12.sp) })
+                    Tab(selected = activeTab == 1, onClick = { activeTab = 1 }, text = { Text(if (s.isArabic) "ترجمة EN↔AR" else "Translate", fontSize = 12.sp) })
+                    Tab(selected = activeTab == 2, onClick = { activeTab = 2 }, text = { Text(if (s.isArabic) "اسأل الملف" else "Ask PDF", fontSize = 12.sp) })
+                    Tab(selected = activeTab == 3, onClick = { activeTab = 3 }, text = { Text(if (s.isArabic) "بيانات/PII" else "Insights", fontSize = 12.sp) })
+                    Tab(selected = activeTab == 4, onClick = { activeTab = 4 }, text = { Text(if (s.isArabic) "فهرس ذكي" else "Outline", fontSize = 12.sp) })
                 }
             }
 
@@ -407,8 +431,138 @@ fun AiAssistantScreen(
                         }
                     }
 
-                    // TAB 1: ASK YOUR PDF (OFFLINE SEMANTIC Q&A)
+                    // TAB 1: OFFLINE TRANSLATE (EN <-> AR) & ON-DEVICE GEN-AI
                     1 -> {
+                        item {
+                            Card(shape = RoundedCornerShape(16.dp)) {
+                                Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(
+                                        text = if (s.isArabic) "الترجمة الفورية بدون إنترنت (عربي ↔ إنجليزي)" else "100% Offline Bilingual Translation (EN ↔ AR)",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        TranslationDirection.entries.forEach { dir ->
+                                            FilterChip(
+                                                selected = translateDir == dir,
+                                                onClick = { translateDir = dir },
+                                                label = { Text(if (s.isArabic) dir.labelAr else dir.labelEn, fontSize = 11.sp) }
+                                            )
+                                        }
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = {
+                                                val raw = pagesText.joinToString("\n\n").take(6000)
+                                                translatedPreview = OfflineTranslatorEngine.translate(raw, translateDir)
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(if (s.isArabic) "ترجمة الملف الآن" else "Translate PDF Now")
+                                        }
+                                        if (translatedPreview.isNotBlank()) {
+                                            OutlinedButton(onClick = {
+                                                scope.launch {
+                                                    runCatching {
+                                                        val out = FileHelper.uniqueFile(
+                                                            FileHelper.pdfsDir(context),
+                                                            "${file.nameWithoutExtension}_Translated.pdf"
+                                                        )
+                                                        app.pdfEngine.createNewPdf(
+                                                            outputFile = out,
+                                                            title = "Translated — ${file.nameWithoutExtension}",
+                                                            bodyText = translatedPreview,
+                                                            pageCount = 1,
+                                                            template = PageTemplate.BLANK
+                                                        )
+                                                        val info = app.pdfEngine.inspectDocument(out)
+                                                        app.repository.upsertDocument(
+                                                            PdfDocumentItem(name = out.name, path = out.absolutePath, sizeBytes = info.sizeBytes, pageCount = info.pageCount)
+                                                        )
+                                                        onOpenPdfAtPage(out.absolutePath, 0)
+                                                    }
+                                                }
+                                            }) { Text("Save PDF") }
+                                        }
+                                    }
+                                    if (translatedPreview.isNotBlank()) {
+                                        Text(translatedPreview.take(4000), fontSize = 13.sp, lineHeight = 20.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Generative Reply Drafter & Study Flashcards
+                        item {
+                            Card(shape = RoundedCornerShape(16.dp)) {
+                                Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(
+                                        text = if (s.isArabic) "توليد رد رسمي وبطاقات مراجعة (أوفلاين)" else "Offline Executive Reply & Study Flashcards",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = { generatedReply = OfflineTranslatorEngine.draftFormalReply(rep, file.name, inArabic = false) },
+                                            modifier = Modifier.weight(1f)
+                                        ) { Text("Draft Reply (EN)", fontSize = 11.5.sp) }
+                                        Button(
+                                            onClick = { generatedReply = OfflineTranslatorEngine.draftFormalReply(rep, file.name, inArabic = true) },
+                                            modifier = Modifier.weight(1f)
+                                        ) { Text("مسودة رد (عربي)", fontSize = 11.5.sp) }
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            val cards = OfflineTranslatorEngine.generateStudyFlashcards(pagesText)
+                                            generatedReply = cards.mapIndexed { i, c ->
+                                                "Card ${i + 1} (P.${c.pageNumber})\nQ: ${c.question}\nA: ${c.answer}"
+                                            }.joinToString("\n\n")
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { Text(if (s.isArabic) "توليد بطاقات مراجعة دراسية (Flashcards)" else "Generate Study Flashcards Deck") }
+
+                                    if (generatedReply.isNotBlank()) {
+                                        Text(generatedReply, fontSize = 13.sp, lineHeight = 19.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Local On-Device GGUF Model Manager
+                        item {
+                            Card(shape = RoundedCornerShape(16.dp)) {
+                                Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = if (s.isArabic) "نماذج الذكاء الاصطناعي المحلية (GGUF LLM)" else "Local On-Device LLM Model Slot (.gguf)",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        text = if (s.isArabic) "يمكنك اختيار نموذج محلي (.gguf مثل Qwen2.5 أو Gemma3) من ذاكرة جهازك بدون إنترنت للتحقق منه وتجهيزه."
+                                        else "Import any local .gguf model (e.g. Qwen 2.5 / Gemma 3 Arabic-English) from device storage offline to validate its header & prepare local inference.",
+                                        fontSize = 12.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    OutlinedButton(
+                                        onClick = { pickGgufLauncher.launch(arrayOf("*/*")) },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { Text(if (s.isArabic) "استيراد ملف نموذج .gguf محلي" else "Import & Validate Local .gguf Model") }
+                                    ggufInfo?.let { m ->
+                                        Text(
+                                            text = if (m.isValidGgufHeader) {
+                                                "✓ Valid GGUF v${m.ggufVersion}: ${m.fileName} (${PageRangeParser.formatFileSize(m.sizeBytes)})"
+                                            } else {
+                                                "✗ Selected file is not a valid GGUF model header: ${m.fileName}"
+                                            },
+                                            color = if (m.isValidGgufHeader) BrandEmerald else BrandCrimson,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 12.5.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // TAB 2: ASK YOUR PDF (OFFLINE SEMANTIC Q&A)
+                    2 -> {
                         item {
                             Card(shape = RoundedCornerShape(16.dp)) {
                                 Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -479,8 +633,8 @@ fun AiAssistantScreen(
                         }
                     }
 
-                    // TAB 2: SMART INSIGHTS & PII PRIVACY SCANNER
-                    2 -> {
+                    // TAB 3: SMART INSIGHTS & PII PRIVACY SCANNER
+                    3 -> {
                         item {
                             Card(
                                 colors = CardDefaults.cardColors(
@@ -554,8 +708,8 @@ fun AiAssistantScreen(
                         }
                     }
 
-                    // TAB 3: AUTO OUTLINE & SMART BOOKMARKS
-                    3 -> {
+                    // TAB 4: AUTO OUTLINE & SMART BOOKMARKS
+                    4 -> {
                         item {
                             Card(shape = RoundedCornerShape(16.dp)) {
                                 Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

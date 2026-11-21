@@ -12,12 +12,24 @@ android {
         applicationId = "com.ibrahimjaber.pdfpro"
         minSdk = 24
         targetSdk = 35
-        versionCode = 3
-        versionName = "3.0.0"
+        versionCode = 4
+        versionName = "4.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+    }
+
+    signingConfigs {
+        val ksPath = System.getenv("KEYSTORE_FILE")
+        if (!ksPath.isNullOrBlank() && file(ksPath).exists()) {
+            create("release") {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("KEY_ALIAS") ?: ""
+                keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+            }
         }
     }
 
@@ -29,6 +41,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
         debug {
             applicationIdSuffix = ".debug"
@@ -85,16 +98,19 @@ dependencies {
     implementation(libs.androidx.exifinterface)
     implementation(libs.androidx.documentfile)
 
-    // 100% Offline PDF Editing & Pro Manipulation Engine (Apache PDFBox-Android)
+    // 100% Offline PDF Editing, AcroForms & Cryptographic X.509 Signing (Apache PDFBox-Android)
     implementation(libs.pdfbox.android)
+
+    // 100% Offline Arabic & English Scanned-PDF OCR (Tesseract 5 LSTM)
+    implementation(libs.tesseract4android)
 
     // Offline QR Code Stamp Generation
     implementation(libs.zxing.core)
 
-    // Local JSON persistence for library, bookmarks, and signatures
+    // Local JSON persistence
     implementation(libs.gson)
 
-    // Coroutines for responsive off-main-thread PDF rendering & editing
+    // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)

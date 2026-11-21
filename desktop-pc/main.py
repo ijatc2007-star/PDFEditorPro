@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw, ImageOps, ImageTk
 
 import ai_engine_pc as ai_engine
 import pdf_engine_pc as engine
+import v4_engines_pc as v4
 from strings_pc import APP_NAME, APP_VERSION, CREDIT_AR, CREDIT_EN, STRINGS
 
 ctk.set_appearance_mode("Dark")
@@ -97,10 +98,13 @@ class PdfProStudioApp(ctk.CTk):
         self.geometry("1260x820")
         self.minsize(1020, 680)
 
-        # Viewer & Editor state
+        # Viewer & Editor state (v4.0: Multi-Tab + Continuous Scroll)
         self.doc: Optional[fitz.Document] = None
         self.doc_path: Optional[str] = None
         self.doc_password: Optional[str] = None
+        self.open_tabs: List[str] = []
+        self.continuous_scroll: bool = False
+        self._scroll_photos: List[ImageTk.PhotoImage] = []
         self.current_page: int = 0
         self.zoom: float = 1.25
         self.reading_mode: str = "day"  # day, sepia, night
@@ -251,12 +255,14 @@ class PdfProStudioApp(ctk.CTk):
         self.page_lbl.pack(side="left", padx=2)
         ctk.CTkButton(top_bar, text="▶", width=36, command=self._next_page).pack(side="left", padx=(2, 10))
 
-        ctk.CTkButton(top_bar, text="Zoom -", width=66, command=lambda: self._set_zoom(self.zoom - 0.2)).pack(side="left", padx=2)
-        ctk.CTkButton(top_bar, text="Zoom +", width=66, command=lambda: self._set_zoom(self.zoom + 0.2)).pack(side="left", padx=2)
-        ctk.CTkButton(top_bar, text="Mode", width=66, fg_color="#7C3AED", command=self._cycle_reading_mode).pack(side="left", padx=6)
+        ctk.CTkButton(top_bar, text="Zoom -", width=60, command=lambda: self._set_zoom(self.zoom - 0.2)).pack(side="left", padx=2)
+        ctk.CTkButton(top_bar, text="Zoom +", width=60, command=lambda: self._set_zoom(self.zoom + 0.2)).pack(side="left", padx=2)
+        ctk.CTkButton(top_bar, text="Scroll", width=60, fg_color="#0284C7", command=self._toggle_continuous_scroll).pack(side="left", padx=3)
+        ctk.CTkButton(top_bar, text="Tabs", width=52, fg_color="#0D9488", command=self._tool_switch_tab).pack(side="left", padx=2)
+        ctk.CTkButton(top_bar, text="Mode", width=58, fg_color="#7C3AED", command=self._cycle_reading_mode).pack(side="left", padx=3)
 
-        ctk.CTkButton(top_bar, text="Undo", width=60, fg_color="#64748B", command=self._undo).pack(side="right", padx=4)
-        ctk.CTkButton(top_bar, text="Redo", width=60, fg_color="#64748B", command=self._redo).pack(side="right", padx=2)
+        ctk.CTkButton(top_bar, text="Undo", width=54, fg_color="#64748B", command=self._undo).pack(side="right", padx=3)
+        ctk.CTkButton(top_bar, text="Redo", width=54, fg_color="#64748B", command=self._redo).pack(side="right", padx=2)
 
         # Second Bar: Pro Editor Tools
         edit_bar = ctk.CTkScrollableFrame(frame, height=44, orientation="horizontal")
@@ -352,11 +358,42 @@ class PdfProStudioApp(ctk.CTk):
         except Exception as exc:
             messagebox.showerror("Open Error", str(exc))
 
+    def _toggle_continuous_scroll(self):
+        self.continuous_scroll = not self.continuous_scroll
+        self._render_current_page()
+        self.status_var.set("Scroll Mode: Continuous Vertical Book Scroll" if self.continuous_scroll else "Scroll Mode: Single Page Precision")
+
     def _render_current_page(self):
         if self.doc is None or len(self.doc) == 0:
             return
-        page = self.doc[self.current_page]
+        if self.doc_path and self.doc_path not in self.open_tabs:
+            self.open_tabs.append(self.doc_path)
+
         mat = fitz.Matrix(self.zoom, self.zoom)
+        self.pdf_canvas.delete("all")
+        self._offset_x, self._offset_y = 24, 20
+
+        if self.continuous_scroll and self.active_tool == "pan" and len(self.doc) > 1:
+            self._scroll_photos.clear()
+            y_cursor = 20
+            max_w = 600
+            for idx in range(min(len(self.doc), 40)):
+                pix = self.doc[idx].get_pixmap(matrix=mat)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                if self.reading_mode == "night":
+                    img = ImageOps.invert(img)
+                elif self.reading_mode == "sepia":
+                    img = ImageOps.colorize(ImageOps.grayscale(img), black="#2E2216", white="#F5ECD9")
+                photo = ImageTk.PhotoImage(img)
+                self._scroll_photos.append(photo)
+                self.pdf_canvas.create_image(self._offset_x, y_cursor, anchor="nw", image=photo)
+                y_cursor += img.height + 18
+                max_w = max(max_w, img.width)
+            self.pdf_canvas.configure(scrollregion=(0, 0, max_w + 48, y_cursor + 24))
+            self.page_lbl.configure(text=f"Continuous ({len(self.doc)}p)")
+            return
+
+        page = self.doc[self.current_page]
         pix = page.get_pixmap(matrix=mat)
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
@@ -368,8 +405,6 @@ class PdfProStudioApp(ctk.CTk):
 
         self._rendered_w, self._rendered_h = img.width, img.height
         self._page_photo = ImageTk.PhotoImage(img)
-        self.pdf_canvas.delete("all")
-        self._offset_x, self._offset_y = 24, 20
         self.pdf_canvas.create_image(self._offset_x, self._offset_y, anchor="nw", image=self._page_photo)
         self.pdf_canvas.configure(scrollregion=(0, 0, img.width + 48, img.height + 40))
 
@@ -665,9 +700,13 @@ class PdfProStudioApp(ctk.CTk):
 
         ctrl = ctk.CTkFrame(frame)
         ctrl.pack(fill="x", padx=20, pady=6)
-        ctk.CTkButton(ctrl, text="Analyze Currently Open PDF", fg_color="#7C3AED", command=lambda: self._run_ai_analysis(self.doc_path)).pack(side="left", padx=8, pady=10)
-        ctk.CTkButton(ctrl, text="Pick Another PDF...", command=self._pick_pdf_for_ai).pack(side="left", padx=6, pady=10)
-        ctk.CTkButton(ctrl, text="Export AI Summary PDF", fg_color="#059669", command=self._export_ai_summary_pdf).pack(side="right", padx=8, pady=10)
+        ctk.CTkButton(ctrl, text="Analyze Open PDF", fg_color="#7C3AED", command=lambda: self._run_ai_analysis(self.doc_path)).pack(side="left", padx=6, pady=10)
+        ctk.CTkButton(ctrl, text="Pick PDF...", width=92, command=self._pick_pdf_for_ai).pack(side="left", padx=4, pady=10)
+        ctk.CTkButton(ctrl, text="Translate EN↔AR", fg_color="#0284C7", command=self._ai_translate_pdf).pack(side="left", padx=4, pady=10)
+        ctk.CTkButton(ctrl, text="Flashcards", width=92, fg_color="#0D9488", command=self._ai_flashcards).pack(side="left", padx=4, pady=10)
+        ctk.CTkButton(ctrl, text="Draft Reply", width=92, fg_color="#D97706", command=self._ai_draft_reply).pack(side="left", padx=4, pady=10)
+        ctk.CTkButton(ctrl, text="GGUF Model", width=96, fg_color="#475569", command=self._ai_validate_gguf).pack(side="left", padx=4, pady=10)
+        ctk.CTkButton(ctrl, text="Save Summary PDF", fg_color="#059669", command=self._export_ai_summary_pdf).pack(side="right", padx=6, pady=10)
 
         # Ask Your PDF Bar
         qa_bar = ctk.CTkFrame(frame)
@@ -764,6 +803,76 @@ class PdfProStudioApp(ctk.CTk):
         self._open_pdf_path(out)
         self._show_tab("viewer")
         messagebox.showinfo("Saved", f"Saved AI Summary PDF:\n{out}")
+
+    def _ai_translate_pdf(self):
+        if not self._ai_pages and self.doc_path:
+            self._run_ai_analysis(self.doc_path)
+        if not self._ai_pages:
+            messagebox.showinfo("Offline Translator", "Open or analyze a PDF first.")
+            return
+        direction = simpledialog.askstring(
+            "Offline Translator (EN ↔ AR)",
+            "Enter direction: auto, en_to_ar, or ar_to_en:",
+            initialvalue="auto",
+        )
+        if not direction:
+            return
+        src_text = "\n\n".join(self._ai_pages)
+        translated = v4.translate_offline(src_text, direction=direction.strip().lower())
+        header = f"=== OFFLINE BILINGUAL TRANSLATION ({direction.upper()}) — {Path(self._ai_pdf_path or 'Document').name} ===\n\n"
+        self.ai_output_box.delete("1.0", "end")
+        self.ai_output_box.insert("1.0", header + translated)
+        self.status_var.set("Offline EN↔AR translation complete — click 'Save Summary PDF' to export as PDF.")
+
+    def _ai_flashcards(self):
+        if not self._ai_pages and self.doc_path:
+            self._run_ai_analysis(self.doc_path)
+        if not self._ai_pages:
+            messagebox.showinfo("Study Flashcards", "Open or analyze a PDF first.")
+            return
+        cards = v4.generate_study_flashcards(self._ai_pages, max_cards=8)
+        lines = [f"=== OFFLINE AI STUDY FLASHCARDS ({len(cards)} cards) ===", ""]
+        for i, (pg, q, a) in enumerate(cards, start=1):
+            lines.append(f"Card #{i} [Page {pg}]")
+            lines.append(f"  Q: {q}")
+            lines.append(f"  A: {a}\n")
+        self.ai_output_box.delete("1.0", "end")
+        self.ai_output_box.insert("1.0", "\n".join(lines))
+        self.status_var.set(f"Generated {len(cards)} offline study flashcards.")
+
+    def _ai_draft_reply(self):
+        if not self._ai_last_report and self.doc_path:
+            self._run_ai_analysis(self.doc_path)
+        if not self._ai_last_report:
+            messagebox.showinfo("Executive Reply Drafter", "Open or analyze a PDF first.")
+            return
+        arabic = messagebox.askyesno("Executive Reply Language", "Draft the executive reply in Arabic?\n(Yes = Arabic / No = English)")
+        draft = v4.draft_formal_reply(self._ai_last_report, Path(self._ai_pdf_path or "Document.pdf").name, arabic=arabic)
+        self.ai_output_box.delete("1.0", "end")
+        self.ai_output_box.insert("1.0", f"=== OFFLINE EXECUTIVE REPLY DRAFT ===\n\n{draft}")
+        self.status_var.set("Offline executive reply drafted.")
+
+    def _ai_validate_gguf(self):
+        path = filedialog.askopenfilename(
+            title="Select Local On-Device LLM Model (.gguf)",
+            filetypes=[("GGUF Models", "*.gguf"), ("All Files", "*.*")],
+        )
+        if not path:
+            return
+        info = v4.inspect_gguf_model(path)
+        size_mb = info["size"] / (1024 * 1024)
+        status = "VALID GGUF HEADER" if info["valid"] else "INVALID / NON-GGUF FILE"
+        report = (
+            f"=== ON-DEVICE LOCAL LLM MODEL INSPECTOR ===\n\n"
+            f"File: {info['name']}\n"
+            f"Size: {size_mb:.2f} MB ({info['size']} bytes)\n"
+            f"Status: {status}\n"
+            f"GGUF Format Version: v{info['version']}\n"
+            f"Privacy Mode: 100% Local Offline Verification (Zero Network Calls)\n"
+        )
+        self.ai_output_box.delete("1.0", "end")
+        self.ai_output_box.insert("1.0", report)
+        self.status_var.set(f"GGUF check: {status} (v{info['version']})")
 
     # =========================================================================
     # TAB 2: UNIVERSAL OFFLINE FORMAT CONVERTER
@@ -924,14 +1033,14 @@ class PdfProStudioApp(ctk.CTk):
             messagebox.showerror("Error", str(exc))
 
     # =========================================================================
-    # TAB 3: 16 PRO OFFLINE PDF TOOLS
+    # TAB 3: 20 PRO OFFLINE PDF TOOLS (v4.0)
     # =========================================================================
 
     def _build_tools_tab(self):
         frame = ctk.CTkScrollableFrame(self.main_area, corner_radius=0)
         self.tabs["tools"] = frame
 
-        ctk.CTkLabel(frame, text="16 Commercial-Grade Offline Pro PDF Tools", font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", padx=20, pady=(18, 2))
+        ctk.CTkLabel(frame, text="20 Commercial-Grade Offline Pro PDF Tools (v4.0)", font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", padx=20, pady=(18, 2))
         ctk.CTkLabel(frame, text=f"{CREDIT_EN}  |  {CREDIT_AR}", text_color="#38BDF8").pack(anchor="w", padx=20, pady=(0, 14))
 
         grid = ctk.CTkFrame(frame, fg_color="transparent")
@@ -940,6 +1049,11 @@ class PdfProStudioApp(ctk.CTk):
             grid.grid_columnconfigure(c, weight=1)
 
         tools = [
+            ("Offline AR+EN OCR", "Scanned PDF → Searchable PDF", "#0D9488", self._tool_ocr),
+            ("Interactive Form Filler", "Fill & flatten AcroForms", "#7C3AED", self._tool_form_filler),
+            ("X.509 Digital Signer", "RSA-2048 PKCS#12 SHA-256", "#059669", self._tool_digital_sign),
+            ("Switch Open PDF Tab", "Multi-tab document switcher", "#0284C7", self._tool_switch_tab),
+            ("AI Studio & Translator", "EN↔AR, Q&A, Flashcards, GGUF", "#7C3AED", lambda: self._show_tab("ai")),
             ("Merge PDFs", "Combine multiple PDFs", "#DC2626", self._tool_merge),
             ("Split PDF", "Extract ranges or single pages", "#0284C7", self._tool_split),
             ("Rotate / Reorder Pages", "Rotate 90° or reorder pages", "#7C3AED", self._tool_rotate),
@@ -1180,6 +1294,208 @@ class PdfProStudioApp(ctk.CTk):
         except Exception as exc:
             messagebox.showerror("Create Error", str(exc))
 
+    def _tool_ocr(self):
+        src = filedialog.askopenfilename(title="Select Scanned PDF for Offline OCR", filetypes=[("PDF Files", "*.pdf")])
+        if not src:
+            return
+        lang = simpledialog.askstring(
+            "Offline OCR Language",
+            "Enter OCR language pack (ara+eng, ara, or eng):",
+            initialvalue="ara+eng",
+        )
+        if not lang:
+            return
+        out = filedialog.asksaveasfilename(
+            title="Save Searchable OCR PDF",
+            defaultextension=".pdf",
+            initialfile=f"{Path(src).stem}_OCR_Searchable.pdf",
+            filetypes=[("PDF Files", "*.pdf")],
+        )
+        if not out:
+            return
+        try:
+            self.status_var.set(f"Running offline {lang} OCR on {Path(src).name}...")
+            self.update_idletasks()
+            pages, saved = v4.ocr_scanned_pdf(src, language=lang.strip(), output_searchable_pdf=out)
+            total_chars = sum(len(p) for p in pages)
+            if saved:
+                self._open_pdf_path(saved)
+                self._show_tab("viewer")
+            win = ctk.CTkToplevel(self)
+            win.title(f"Offline OCR Result ({lang}) — {Path(src).name}")
+            win.geometry("720x500")
+            box = ctk.CTkTextbox(win, font=ctk.CTkFont(size=13))
+            box.pack(fill="both", expand=True, padx=14, pady=14)
+            extracted = "\n\n".join(f"--- Page {i + 1} ---\n{txt}" for i, txt in enumerate(pages))
+            box.insert("1.0", f"Saved Searchable PDF: {saved}\nPages: {len(pages)} | Extracted chars: {total_chars}\n\n{extracted}")
+            self.status_var.set(f"Offline OCR complete ({len(pages)} pages, {total_chars} chars).")
+        except Exception as exc:
+            messagebox.showerror("Offline OCR Error", str(exc))
+
+    def _tool_form_filler(self):
+        create_sample = messagebox.askyesno(
+            "Interactive PDF Form Filler (AcroForm)",
+            "Would you like to open an existing PDF form?\n\nYes = Pick existing PDF Form\nNo = Create a sample Interactive AcroForm PDF to test",
+        )
+        if not create_sample:
+            sample_out = filedialog.asksaveasfilename(
+                title="Save Sample Interactive Form",
+                defaultextension=".pdf",
+                initialfile="Sample_Interactive_Form_2026.pdf",
+                filetypes=[("PDF Files", "*.pdf")],
+            )
+            if not sample_out:
+                return
+            try:
+                v4.create_sample_interactive_form(sample_out)
+                src = sample_out
+            except Exception as exc:
+                messagebox.showerror("Form Creation Error", str(exc))
+                return
+        else:
+            src = filedialog.askopenfilename(title="Select Interactive PDF Form", filetypes=[("PDF Files", "*.pdf")])
+            if not src:
+                return
+
+        try:
+            fields = v4.read_form_fields(src)
+        except Exception as exc:
+            messagebox.showerror("Form Read Error", str(exc))
+            return
+
+        if not fields:
+            messagebox.showinfo("No Interactive Fields", "This PDF has no native AcroForm fields. You can create a sample form to try it.")
+            return
+
+        win = ctk.CTkToplevel(self)
+        win.title(f"Interactive AcroForm Filler — {Path(src).name}")
+        win.geometry("640x540")
+
+        ctk.CTkLabel(win, text=f"Found {len(fields)} Interactive Field(s)", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=16, pady=(14, 6))
+        scroll = ctk.CTkScrollableFrame(win)
+        scroll.pack(fill="both", expand=True, padx=16, pady=6)
+
+        text_vars: Dict[str, ctk.CTkEntry] = {}
+        check_vars: Dict[str, ctk.BooleanVar] = {}
+
+        for f in fields:
+            row = ctk.CTkFrame(scroll)
+            row.pack(fill="x", pady=4, padx=4)
+            lbl_text = f"[P{f['page'] + 1}] {f['label']} ({f['type']})"
+            if f["is_checkbox"]:
+                bvar = ctk.BooleanVar(value=f["checked"])
+                check_vars[f["name"]] = bvar
+                ctk.CTkCheckBox(row, text=lbl_text, variable=bvar).pack(anchor="w", padx=10, pady=8)
+            else:
+                ctk.CTkLabel(row, text=lbl_text, width=210, anchor="w").pack(side="left", padx=8, pady=6)
+                ent = ctk.CTkEntry(row)
+                ent.insert(0, f["value"])
+                ent.pack(side="left", fill="x", expand=True, padx=8, pady=6)
+                text_vars[f["name"]] = ent
+
+        flatten_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(win, text="Flatten form fields into permanent PDF (read-only)", variable=flatten_var).pack(anchor="w", padx=18, pady=(6, 4))
+
+        def _save_filled():
+            out = filedialog.asksaveasfilename(
+                title="Save Filled PDF Form",
+                defaultextension=".pdf",
+                initialfile=f"{Path(src).stem}_filled.pdf",
+                filetypes=[("PDF Files", "*.pdf")],
+            )
+            if not out:
+                return
+            try:
+                vals = {k: e.get() for k, e in text_vars.items()}
+                chks = {k: bool(v.get()) for k, v in check_vars.items()}
+                v4.fill_and_save_form(src, out, vals, chks, flatten=bool(flatten_var.get()))
+                win.destroy()
+                self._open_pdf_path(out)
+                self._show_tab("viewer")
+                messagebox.showinfo("Form Saved", f"Saved filled PDF form:\n{out}")
+            except Exception as exc:
+                messagebox.showerror("Form Save Error", str(exc))
+
+        ctk.CTkButton(win, text="Save Filled PDF", height=38, fg_color="#059669", command=_save_filled).pack(fill="x", padx=18, pady=(4, 14))
+
+    def _tool_digital_sign(self):
+        src = filedialog.askopenfilename(title="Select PDF to Digitally Sign (X.509 RSA-2048)", filetypes=[("PDF Files", "*.pdf")])
+        if not src:
+            return
+        use_existing = messagebox.askyesno(
+            "X.509 PKCS#12 Certificate",
+            "Do you already have a .p12 / .pfx certificate?\n\nYes = Select existing .p12/.pfx file\nNo = Generate a new Offline RSA-2048 X.509 .p12 certificate now",
+        )
+        if use_existing:
+            p12_path = filedialog.askopenfilename(title="Select PKCS#12 Certificate", filetypes=[("PKCS#12 Certificate", "*.p12 *.pfx")])
+            if not p12_path:
+                return
+            pwd = simpledialog.askstring("Certificate Password", "Enter PKCS#12 password:", show="*")
+            if pwd is None:
+                return
+        else:
+            cn = simpledialog.askstring("Generate X.509 Certificate", "Signer Common Name (CN):", initialvalue="Ibrahim Jaber")
+            if not cn:
+                return
+            org = simpledialog.askstring("Generate X.509 Certificate", "Organization:", initialvalue="PDF Editor Pro 2026") or "PDF Editor Pro 2026"
+            pwd = simpledialog.askstring("Certificate Password", "Set password for new .p12 certificate:", initialvalue="2026", show="*")
+            if not pwd:
+                return
+            p12_path = filedialog.asksaveasfilename(
+                title="Save New RSA-2048 PKCS#12 Certificate",
+                defaultextension=".p12",
+                initialfile="IbrahimJaber_X509_2026.p12",
+                filetypes=[("PKCS#12 Certificate", "*.p12")],
+            )
+            if not p12_path:
+                return
+            try:
+                v4.generate_x509_p12(p12_path, common_name=cn, organization=org, password=pwd)
+            except Exception as exc:
+                messagebox.showerror("Certificate Error", str(exc))
+                return
+
+        reason = simpledialog.askstring("Signature Reason", "Enter signing reason:", initialvalue="Approved & Verified Offline") or "Approved & Verified Offline"
+        out = filedialog.asksaveasfilename(
+            title="Save Digitally Signed PDF",
+            defaultextension=".pdf",
+            initialfile=f"{Path(src).stem}_X509_Signed.pdf",
+            filetypes=[("PDF Files", "*.pdf")],
+        )
+        if not out:
+            return
+        try:
+            info = v4.sign_pdf_with_x509(src, out, p12_path, pwd, reason=reason)
+            self._open_pdf_path(out)
+            self._show_tab("viewer")
+            messagebox.showinfo(
+                "Digitally Signed (RSA-2048 / SHA-256)",
+                f"Signed successfully!\n\nSigner: {info['signer']}\nTimestamp: {info['timestamp']}\nSHA-256: {info['sha256'][:24]}...\nSaved: {out}",
+            )
+        except Exception as exc:
+            messagebox.showerror("Digital Signature Error", str(exc))
+
+    def _tool_switch_tab(self):
+        if not self.open_tabs:
+            messagebox.showinfo("Open Tabs", "No PDF documents are open yet. Open a PDF first.")
+            return
+        win = ctk.CTkToplevel(self)
+        win.title(f"Open PDF Tabs ({len(self.open_tabs)})")
+        win.geometry("520x360")
+        ctk.CTkLabel(win, text="Switch Between Open PDF Documents", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=16, pady=(14, 8))
+        scroll = ctk.CTkScrollableFrame(win)
+        scroll.pack(fill="both", expand=True, padx=16, pady=(0, 14))
+        for tab_path in list(self.open_tabs):
+            active = tab_path == self.doc_path
+            label = f"{'● ' if active else ''}{Path(tab_path).name}"
+            ctk.CTkButton(
+                scroll,
+                text=label,
+                fg_color="#0284C7" if active else "#334155",
+                anchor="w",
+                command=lambda p=tab_path: (win.destroy(), self._open_pdf_path(p), self._show_tab("viewer")),
+            ).pack(fill="x", pady=4, padx=4)
+
     # =========================================================================
     # TAB 4: SETTINGS & ABOUT (IBRAHIM JABER 2026)
     # =========================================================================
@@ -1197,11 +1513,12 @@ class PdfProStudioApp(ctk.CTk):
         ctk.CTkLabel(
             card,
             text=(
-                "• 100% Offline Standalone Windows PC (.exe) + Android (.apk) Suite\n"
-                "• Universal Bidirectional Converter: PDF ↔ Word (.docx), Excel (.xlsx), CSV, PowerPoint (.pptx), Images, HTML & TXT\n"
-                "• Full Arabic RTL & English Bilingual Interface\n"
-                "• Pro Editor: True Redaction, Whiteout, Pen, Highlighter, Underline, Strike, Shapes, Stamps, QR Codes & Signature Pad\n"
-                "• 16 Commercial-Grade Offline Tools: Merge, Split, Organize, Compress, Grayscale, AES-256 Lock/Unlock, Watermark, Bates & Compare Diff"
+                "• 100% Offline Standalone Windows PC (.exe) + Android (.apk / Play Store .aab) Suite\n"
+                "• Pillar 1: Offline Arabic + English Scanned-PDF OCR (Tesseract 5 LSTM → Searchable PDF)\n"
+                "• Pillar 2: Offline AI Studio — EN↔AR Translation, Q&A, Study Flashcards, Executive Reply & Local GGUF Inspector\n"
+                "• Pillar 3: Interactive Native PDF AcroForm Filler, Flattener & Sample Form Generator\n"
+                "• Pillar 4: Continuous Vertical Book Scroll + Multi-Tab Document Switcher & Full RTL Arabic/English UI\n"
+                "• Pillar 5: Cryptographic X.509 RSA-2048 PKCS#12 Digital Signatures + Universal Format Converter + 20 Pro Tools"
             ),
             justify="left",
             font=ctk.CTkFont(size=13),

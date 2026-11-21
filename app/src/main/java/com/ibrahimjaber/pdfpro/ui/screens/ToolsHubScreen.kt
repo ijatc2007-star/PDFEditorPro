@@ -67,6 +67,10 @@ data class ProToolCardItem(
 )
 
 val ALL_PRO_TOOLS = listOf(
+    ProToolCardItem("ocr_studio", "Arabic & EN OCR", "التعرف الضوئي OCR", "Scanned PDF → Searchable PDF (AR+EN)", "تحويل الصور الممسوحة إلى PDF قابل للبحث", Icons.Default.GridView, BrandCrimson),
+    ProToolCardItem("ai_studio", "AI Translate & Chat", "الذكاء والترجمة (AI)", "Summarize, Translate EN↔AR, Flashcards", "تلخيص وترجمة عربي↔إنجليزي وبطاقات مراجعة", Icons.Default.Info, BrandPurple),
+    ProToolCardItem("form_filler", "Fill PDF Forms", "تعبئة نماذج AcroForm", "Fill native text, checkboxes & flatten", "تعبئة حقول النماذج التفاعلية وتثبيتها", Icons.Default.TextSnippet, BrandBlue),
+    ProToolCardItem("digital_sign", "X.509 Digital Sign", "توقيع رقمي مشفّر", "RSA-2048 PKCS#12 sign & verify PDFs", "توقيع تشفيري بشهادة X.509 والتحقق منه", Icons.Default.Lock, BrandEmerald),
     ProToolCardItem("converter", "Format Converter", "محول الصيغ الشامل", "PDF ↔ Word, Excel, CSV, PPTX", "تحويل PDF ↔ وورد، إكسل، CSV، صور", Icons.Default.SwapHoriz, BrandBlue),
     ProToolCardItem("merge", "Merge PDFs", "دمج ملفات PDF", "Combine multiple PDFs into one", "دمج عدة ملفات PDF في ملف واحد", Icons.Default.CallMerge, BrandCrimson),
     ProToolCardItem("split", "Split PDF", "تقسيم PDF", "Extract ranges or single pages", "استخراج صفحات أو تقسيم كل صفحة", Icons.Default.CallSplit, BrandBlue),
