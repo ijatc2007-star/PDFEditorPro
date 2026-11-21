@@ -77,6 +77,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ibrahimjaber.pdfpro.PdfProApp
 import com.ibrahimjaber.pdfpro.data.AppBranding
+import com.ibrahimjaber.pdfpro.data.AppLanguage
+import com.ibrahimjaber.pdfpro.data.LocalStrings
 import com.ibrahimjaber.pdfpro.data.PageRangeParser
 import com.ibrahimjaber.pdfpro.data.PageTemplate
 import com.ibrahimjaber.pdfpro.data.PdfDocumentItem
@@ -98,6 +100,8 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val s = LocalStrings.current
+    val settings by app.repository.settings.collectAsState()
     val documents by app.repository.documents.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
@@ -203,28 +207,39 @@ fun HomeScreen(
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Text(
-                                    text = "100% OFFLINE PRO",
+                                    text = s.offlineBadge,
                                     color = Color.White,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
                         }
-                        Text(
-                            text = "v${AppBranding.APP_VERSION}",
-                            color = Color.White.copy(alpha = 0.75f),
-                            fontSize = 12.sp
-                        )
+                        Surface(
+                            color = Color.White.copy(alpha = 0.22f),
+                            shape = RoundedCornerShape(999.dp),
+                            modifier = Modifier.clickable {
+                                val next = if (settings.language == AppLanguage.ARABIC) AppLanguage.ENGLISH else AppLanguage.ARABIC
+                                app.repository.updateSettings { it.copy(language = next) }
+                            }
+                        ) {
+                            Text(
+                                text = if (s.isArabic) "EN" else "عربي",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                            )
+                        }
                     }
 
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        text = AppBranding.APP_NAME,
+                        text = s.appName,
                         color = Color.White,
                         style = MaterialTheme.typography.headlineMedium
                     )
                     Text(
-                        text = AppBranding.CREDIT_LINE,
+                        text = s.creditLine,
                         color = Color(0xFFE0F2FE),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium
@@ -242,7 +257,7 @@ fun HomeScreen(
                         ) {
                             Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Open PDF")
+                            Text(s.openPdf)
                         }
                         OutlinedButton(
                             onClick = { showCreateDialog = true },
@@ -251,7 +266,7 @@ fun HomeScreen(
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Create PDF", color = Color.White)
+                            Text(s.createPdf, color = Color.White)
                         }
                     }
                 }
@@ -266,21 +281,21 @@ fun HomeScreen(
             ) {
                 QuickChipCard(
                     modifier = Modifier.weight(1f),
-                    title = "Img → PDF",
+                    title = s.convertAny,
                     icon = Icons.Default.Image,
                     tint = BrandBlue,
-                    onClick = { onOpenTool("images_to_pdf") }
+                    onClick = { onOpenTool("converter") }
                 )
                 QuickChipCard(
                     modifier = Modifier.weight(1f),
-                    title = "Merge",
+                    title = s.mergeQuick,
                     icon = Icons.Default.CreateNewFolder,
                     tint = BrandCrimson,
                     onClick = { onOpenTool("merge") }
                 )
                 QuickChipCard(
                     modifier = Modifier.weight(1f),
-                    title = "Sample PDF",
+                    title = s.sampleGuide,
                     icon = Icons.Default.Description,
                     tint = Color(0xFF059669),
                     onClick = {
@@ -311,7 +326,7 @@ fun HomeScreen(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search your offline PDF library...") },
+                placeholder = { Text(s.searchLibraryHint) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {

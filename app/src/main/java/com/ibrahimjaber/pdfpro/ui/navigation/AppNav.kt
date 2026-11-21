@@ -6,6 +6,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -22,6 +23,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.ibrahimjaber.pdfpro.PdfProApp
+import com.ibrahimjaber.pdfpro.data.LocalStrings
+import com.ibrahimjaber.pdfpro.ui.screens.ConverterScreen
 import com.ibrahimjaber.pdfpro.ui.screens.HomeScreen
 import com.ibrahimjaber.pdfpro.ui.screens.PageOrganizerScreen
 import com.ibrahimjaber.pdfpro.ui.screens.ProToolWorkspaceScreen
@@ -31,6 +34,7 @@ import com.ibrahimjaber.pdfpro.ui.screens.ViewerEditorScreen
 
 object Routes {
     const val LIBRARY = "library"
+    const val CONVERTER = "converter"
     const val TOOLS = "tools"
     const val SETTINGS = "settings"
     const val VIEWER = "viewer/{path}"
@@ -48,6 +52,7 @@ fun PdfProNavHost(
     pendingOpenPath: String?,
     onConsumedOpenPath: () -> Unit
 ) {
+    val s = LocalStrings.current
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
@@ -59,7 +64,7 @@ fun PdfProNavHost(
         }
     }
 
-    val showBottomBar = currentRoute in listOf(Routes.LIBRARY, Routes.TOOLS, Routes.SETTINGS)
+    val showBottomBar = currentRoute in listOf(Routes.LIBRARY, Routes.CONVERTER, Routes.TOOLS, Routes.SETTINGS)
 
     Scaffold(
         bottomBar = {
@@ -73,8 +78,19 @@ fun PdfProNavHost(
                                 launchSingleTop = true
                             }
                         },
-                        icon = { Icon(Icons.Default.Folder, contentDescription = "Library") },
-                        label = { Text("Library") }
+                        icon = { Icon(Icons.Default.Folder, contentDescription = s.navLibrary) },
+                        label = { Text(s.navLibrary) }
+                    )
+                    NavigationBarItem(
+                        selected = currentRoute == Routes.CONVERTER,
+                        onClick = {
+                            navController.navigate(Routes.CONVERTER) {
+                                popUpTo(Routes.LIBRARY)
+                                launchSingleTop = true
+                            }
+                        },
+                        icon = { Icon(Icons.Default.SwapHoriz, contentDescription = s.navConverter) },
+                        label = { Text(s.navConverter) }
                     )
                     NavigationBarItem(
                         selected = currentRoute == Routes.TOOLS,
@@ -84,8 +100,8 @@ fun PdfProNavHost(
                                 launchSingleTop = true
                             }
                         },
-                        icon = { Icon(Icons.Default.Build, contentDescription = "Pro Tools") },
-                        label = { Text("Pro Tools") }
+                        icon = { Icon(Icons.Default.Build, contentDescription = s.navProTools) },
+                        label = { Text(s.navProTools) }
                     )
                     NavigationBarItem(
                         selected = currentRoute == Routes.SETTINGS,
@@ -95,8 +111,8 @@ fun PdfProNavHost(
                                 launchSingleTop = true
                             }
                         },
-                        icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
-                        label = { Text("Settings") }
+                        icon = { Icon(Icons.Default.Settings, contentDescription = s.navSettings) },
+                        label = { Text(s.navSettings) }
                     )
                 }
             }
@@ -112,13 +128,32 @@ fun PdfProNavHost(
                     app = app,
                     onOpenPdf = { path -> navController.navigate(Routes.viewer(path)) },
                     onOrganizePdf = { path -> navController.navigate(Routes.organizer(path)) },
-                    onOpenTool = { toolId -> navController.navigate(Routes.toolWorkspace(toolId)) }
+                    onOpenTool = { toolId ->
+                        if (toolId == "converter") {
+                            navController.navigate(Routes.CONVERTER)
+                        } else {
+                            navController.navigate(Routes.toolWorkspace(toolId))
+                        }
+                    }
+                )
+            }
+
+            composable(Routes.CONVERTER) {
+                ConverterScreen(
+                    app = app,
+                    onOpenPdf = { path -> navController.navigate(Routes.viewer(path)) }
                 )
             }
 
             composable(Routes.TOOLS) {
                 ToolsHubScreen(
-                    onSelectTool = { toolId -> navController.navigate(Routes.toolWorkspace(toolId)) }
+                    onSelectTool = { toolId ->
+                        if (toolId == "converter") {
+                            navController.navigate(Routes.CONVERTER)
+                        } else {
+                            navController.navigate(Routes.toolWorkspace(toolId))
+                        }
+                    }
                 )
             }
 

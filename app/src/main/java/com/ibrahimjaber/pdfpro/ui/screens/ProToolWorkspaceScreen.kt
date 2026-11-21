@@ -76,6 +76,8 @@ import com.ibrahimjaber.pdfpro.PdfProApp
 import com.ibrahimjaber.pdfpro.data.AppBranding
 import com.ibrahimjaber.pdfpro.data.CompressionLevel
 import com.ibrahimjaber.pdfpro.data.CompressionResult
+import com.ibrahimjaber.pdfpro.data.HeaderFooterConfig
+import com.ibrahimjaber.pdfpro.data.LocalStrings
 import com.ibrahimjaber.pdfpro.data.PageNumberFormat
 import com.ibrahimjaber.pdfpro.data.PageNumberPosition
 import com.ibrahimjaber.pdfpro.data.PageRangeParser
@@ -99,10 +101,12 @@ fun ProToolWorkspaceScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val s = LocalStrings.current
     val libraryDocs by app.repository.documents.collectAsState()
     val toolMeta = remember(toolId) {
         ALL_PRO_TOOLS.firstOrNull { it.id == toolId } ?: ALL_PRO_TOOLS.first()
     }
+    val needsMultiplePdfs = toolId == "merge" || toolId == "compare"
 
     // Shared tool state
     val selectedPdfFiles = remember { mutableStateListOf<File>() }
@@ -137,6 +141,11 @@ fun ProToolWorkspaceScreen(
     var metaSubject by remember { mutableStateOf("") }
     var metaKeywords by remember { mutableStateOf("") }
     var metaCreator by remember { mutableStateOf(AppBranding.PDF_CREATOR_TAG) }
+    var headerLeft by remember { mutableStateOf("") }
+    var headerCenter by remember { mutableStateOf("CONFIDENTIAL") }
+    var footerLeft by remember { mutableStateOf(AppBranding.CREDIT_LINE) }
+    var batesPrefix by remember { mutableStateOf("DOC-") }
+    var batesStart by remember { mutableStateOf("1") }
 
     // Auto-load metadata when metadata tool picks a file
     LaunchedEffect(toolId, selectedPdfFiles.firstOrNull()?.absolutePath) {
@@ -172,7 +181,7 @@ fun ProToolWorkspaceScreen(
                     if (toolId == "organize") {
                         onOpenOrganizer(imported.absolutePath)
                     } else {
-                        if (toolId != "merge") selectedPdfFiles.clear()
+                        if (!needsMultiplePdfs) selectedPdfFiles.clear()
                         selectedPdfFiles.add(imported)
                     }
                 }
@@ -268,8 +277,8 @@ fun ProToolWorkspaceScreen(
                 },
                 title = {
                     Column {
-                        Text(toolMeta.title, style = MaterialTheme.typography.titleMedium)
-                        Text(toolMeta.subtitle, fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (s.isArabic) toolMeta.titleAr else toolMeta.title, style = MaterialTheme.typography.titleMedium)
+                        Text(if (s.isArabic) toolMeta.subtitleAr else toolMeta.subtitle, fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             )
@@ -292,7 +301,7 @@ fun ProToolWorkspaceScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Text(
-                            text = if (toolId == "images_to_pdf") "1. Select Images" else "1. Select PDF File(s)",
+                            text = if (toolId == "images_to_pdf") "1. Select Images" else s.selectSourceFile,
                             style = MaterialTheme.typography.titleMedium
                         )
                         Row(
@@ -301,9 +310,9 @@ fun ProToolWorkspaceScreen(
                         ) {
                             Button(
                                 onClick = {
-                                    when (toolId) {
-                                        "images_to_pdf" -> pickMultipleImages.launch(arrayOf("image/*"))
-                                        "merge" -> pickMultiplePdfs.launch(arrayOf("application/pdf"))
+                                    when {
+                                        toolId == "images_to_pdf" -> pickMultipleImages.launch(arrayOf("image/*"))
+                                        needsMultiplePdfs -> pickMultiplePdfs.launch(arrayOf("application/pdf"))
                                         else -> pickSinglePdf.launch(arrayOf("application/pdf"))
                                     }
                                 },
@@ -311,7 +320,7 @@ fun ProToolWorkspaceScreen(
                             ) {
                                 Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text(if (toolId == "images_to_pdf") "From Gallery" else "From Device")
+                                Text(if (toolId == "images_to_pdf") "From Gallery" else s.fromDevice)
                             }
 
                             if (toolId != "images_to_pdf" && libraryDocs.isNotEmpty()) {
@@ -537,14 +546,40 @@ fun ProToolWorkspaceScreen(
                                     OutlinedTextField(value = metaKeywords, onValueChange = { metaKeywords = it }, label = { Text("Keywords") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                                     OutlinedTextField(value = metaCreator, onValueChange = { metaCreator = it }, label = { Text("Creator") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                                 }
+
+                                "header_bates" -> {
+                                    OutlinedTextField(value = headerLeft, onValueChange = { headerLeft = it }, label = { Text("Header Left (optional)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                                    OutlinedTextField(value = headerCenter, onValueChange = { headerCenter = it }, label = { Text("Header Center") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                                    OutlinedTextField(value = footerLeft, onValueChange = { footerLeft = it }, label = { Text("Footer Left") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                                    OutlinedTextField(value = batesPrefix, onValueChange = { batesPrefix = it }, label = { Text("Bates Prefix (e.g. DOC- / CASE-)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                                    OutlinedTextField(value = batesStart, onValueChange = { batesStart = it.filter { ch -> ch.isDigit() } }, label = { Text("Bates Start Number") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                                }
+
+                                "grayscale" -> {
+                                    Text(
+                                        text = if (s.isArabic) "تحويل جميع صفحات PDF إلى أبيض وأسود / رمادي عالي الوضوح لتوفير الحبر وتقليل الحجم."
+                                        else "Converts every page into crisp Black & White / Grayscale to save printer ink and reduce file size.",
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                "compare" -> {
+                                    Text(
+                                        text = if (s.isArabic) "اختر ملفي PDF أعلاه (الملف 1 والملف 2) لإصدار تقرير مقارنة شامل بالفروقات."
+                                        else "Select 2 PDF files above (Document A and Document B) to generate an offline page-by-page diff report.",
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
 
                             Spacer(Modifier.height(4.dp))
                             Button(
                                 enabled = !isProcessing && (
                                     (toolId == "images_to_pdf" && selectedImageFiles.isNotEmpty()) ||
-                                        (toolId == "merge" && selectedPdfFiles.size >= 2) ||
-                                        (toolId !in listOf("images_to_pdf", "merge") && selectedPdfFiles.isNotEmpty())
+                                        (needsMultiplePdfs && selectedPdfFiles.size >= 2) ||
+                                        (toolId != "images_to_pdf" && !needsMultiplePdfs && selectedPdfFiles.isNotEmpty())
                                     ),
                                 onClick = {
                                     scope.launch {
@@ -608,6 +643,15 @@ fun ProToolWorkspaceScreen(
                                                     resultPdfFiles = listOf(out)
                                                 }
 
+                                                "grayscale" -> {
+                                                    val src = selectedPdfFiles.first()
+                                                    val out = FileHelper.uniqueFile(pdfsDir, safePdfName)
+                                                    val res = app.pdfEngine.convertToGrayscalePdf(src, out)
+                                                    registerOutputPdfs(listOf(out))
+                                                    compressionResult = res
+                                                    resultPdfFiles = listOf(out)
+                                                }
+
                                                 "protect" -> {
                                                     val src = selectedPdfFiles.first()
                                                     val out = FileHelper.uniqueFile(pdfsDir, safePdfName)
@@ -657,6 +701,29 @@ fun ProToolWorkspaceScreen(
                                                     resultPdfFiles = listOf(out)
                                                 }
 
+                                                "header_bates" -> {
+                                                    val src = selectedPdfFiles.first()
+                                                    val out = FileHelper.uniqueFile(pdfsDir, safePdfName)
+                                                    app.pdfEngine.addHeaderFooterAndBates(
+                                                        inputFile = src,
+                                                        outputFile = out,
+                                                        config = HeaderFooterConfig(
+                                                            headerLeft = headerLeft,
+                                                            headerCenter = headerCenter,
+                                                            footerLeft = footerLeft,
+                                                            batesPrefix = batesPrefix,
+                                                            batesStart = batesStart.toIntOrNull()?.coerceAtLeast(1) ?: 1
+                                                        )
+                                                    )
+                                                    registerOutputPdfs(listOf(out))
+                                                    resultPdfFiles = listOf(out)
+                                                }
+
+                                                "compare" -> {
+                                                    val diff = app.pdfEngine.comparePdfs(selectedPdfFiles[0], selectedPdfFiles[1])
+                                                    extractedTextResult = diff.reportText
+                                                }
+
                                                 "extract_text" -> {
                                                     val src = selectedPdfFiles.first()
                                                     extractedTextResult = app.pdfEngine.extractText(src)
@@ -694,9 +761,9 @@ fun ProToolWorkspaceScreen(
                                 if (isProcessing) {
                                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Processing Offline...")
+                                    Text(s.processingOffline)
                                 } else {
-                                    Text("Run ${toolMeta.title}")
+                                    Text(if (s.isArabic) "تشغيل ${toolMeta.titleAr}" else "Run ${toolMeta.title}")
                                 }
                             }
                         }
@@ -883,7 +950,7 @@ fun ProToolWorkspaceScreen(
                                     if (toolId == "organize") {
                                         onOpenOrganizer(doc.path)
                                     } else {
-                                        if (toolId != "merge") selectedPdfFiles.clear()
+                                        if (!needsMultiplePdfs) selectedPdfFiles.clear()
                                         selectedPdfFiles.add(File(doc.path))
                                     }
                                 }

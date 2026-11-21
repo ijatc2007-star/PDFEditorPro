@@ -43,11 +43,17 @@
                 <data android:mimeType="application/pdf" />
             </intent-filter>
 
-            <!-- Share a PDF or Image directly into PDF Pro Studio -->
+            <!-- Share PDF, Word, Excel, PowerPoint, CSV, Text, or Image directly into PDF Pro Studio -->
             <intent-filter android:label="@string/share_to_pdf_pro">
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+                <data android:mimeType="text/csv" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/html" />
                 <data android:mimeType="image/*" />
             </intent-filter>
 

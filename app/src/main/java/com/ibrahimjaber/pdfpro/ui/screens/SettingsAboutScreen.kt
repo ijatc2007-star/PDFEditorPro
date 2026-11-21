@@ -1,5 +1,6 @@
 package com.ibrahimjaber.pdfpro.ui.screens
 
+import android.graphics.BitmapFactory
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -23,12 +24,13 @@ import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Draw
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.LaptopWindows
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,9 +54,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.graphics.BitmapFactory
 import com.ibrahimjaber.pdfpro.PdfProApp
 import com.ibrahimjaber.pdfpro.data.AppBranding
+import com.ibrahimjaber.pdfpro.data.AppLanguage
+import com.ibrahimjaber.pdfpro.data.LocalStrings
 import com.ibrahimjaber.pdfpro.data.PageRangeParser
 import com.ibrahimjaber.pdfpro.data.ReadingMode
 import com.ibrahimjaber.pdfpro.data.SavedSignature
@@ -67,6 +70,7 @@ import com.ibrahimjaber.pdfpro.ui.theme.BrandNavy
 @Composable
 fun SettingsAboutScreen(app: PdfProApp) {
     val context = LocalContext.current
+    val s = LocalStrings.current
     val settings by app.repository.settings.collectAsState()
     val signatures by app.repository.signatures.collectAsState()
     var showSigPad by remember { mutableStateOf(false) }
@@ -100,12 +104,12 @@ fun SettingsAboutScreen(app: PdfProApp) {
                         Spacer(Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = AppBranding.APP_NAME,
+                                text = s.appName,
                                 color = Color.White,
                                 style = MaterialTheme.typography.titleLarge
                             )
                             Text(
-                                text = "Version ${AppBranding.APP_VERSION} • Offline Edition",
+                                text = "v${AppBranding.APP_VERSION} • Android + Windows PC Edition",
                                 color = Color(0xFFCBD5E1),
                                 fontSize = 12.5.sp
                             )
@@ -120,21 +124,21 @@ fun SettingsAboutScreen(app: PdfProApp) {
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
                             Text(
-                                text = AppBranding.CREDIT_LINE,
+                                text = "${AppBranding.CREDIT_LINE}  |  ${AppBranding.CREDIT_LINE_AR}",
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp
+                                fontSize = 14.5.sp
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                text = AppBranding.COPYRIGHT_NOTICE,
+                                text = s.copyrightNotice,
                                 color = Color(0xFFE0F2FE),
                                 fontSize = 12.5.sp
                             )
                         }
                     }
 
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(10.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -146,17 +150,34 @@ fun SettingsAboutScreen(app: PdfProApp) {
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            text = "100% Offline • Zero Internet Permission • Zero Tracking",
+                            text = s.offlineBadge,
                             color = Color(0xFFDCFCE7),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.LaptopWindows,
+                            contentDescription = null,
+                            tint = Color(0xFF7DD3FC),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = s.pcEditionNote,
+                            color = Color(0xFFE0F2FE),
+                            fontSize = 11.5.sp
                         )
                     }
                 }
             }
         }
 
-        // Appearance Settings
+        // Language & Appearance Settings
         item {
             Card(shape = RoundedCornerShape(16.dp)) {
                 Column(
@@ -166,12 +187,30 @@ fun SettingsAboutScreen(app: PdfProApp) {
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Palette, contentDescription = null, tint = BrandBlue)
+                        Icon(Icons.Default.Language, contentDescription = null, tint = BrandCrimson)
                         Spacer(Modifier.width(8.dp))
-                        Text("Appearance & Reading", style = MaterialTheme.typography.titleMedium)
+                        Text(s.languageLabel, style = MaterialTheme.typography.titleMedium)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AppLanguage.entries.forEach { lang ->
+                            FilterChip(
+                                selected = settings.language == lang,
+                                onClick = {
+                                    app.repository.updateSettings { it.copy(language = lang) }
+                                },
+                                label = { Text(lang.displayName, fontWeight = FontWeight.SemiBold) }
+                            )
+                        }
                     }
 
-                    Text("App Theme", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Palette, contentDescription = null, tint = BrandBlue)
+                        Spacer(Modifier.width(8.dp))
+                        Text(s.settingsAppearance, style = MaterialTheme.typography.titleMedium)
+                    }
+
+                    Text(s.appThemeLabel, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ThemeMode.entries.forEach { mode ->
                             FilterChip(
@@ -184,7 +223,7 @@ fun SettingsAboutScreen(app: PdfProApp) {
                         }
                     }
 
-                    Text("Default PDF Reading Mode", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(s.defaultReadingMode, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ReadingMode.entries.forEach { mode ->
                             FilterChip(
@@ -192,7 +231,7 @@ fun SettingsAboutScreen(app: PdfProApp) {
                                 onClick = {
                                     app.repository.updateSettings { it.copy(defaultReadingMode = mode) }
                                 },
-                                label = { Text(mode.label) }
+                                label = { Text(if (s.isArabic) mode.labelAr else mode.label) }
                             )
                         }
                     }
@@ -217,18 +256,11 @@ fun SettingsAboutScreen(app: PdfProApp) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Draw, contentDescription = null, tint = BrandCrimson)
                             Spacer(Modifier.width(8.dp))
-                            Text("Saved Signatures (${signatures.size})", style = MaterialTheme.typography.titleMedium)
+                            Text("${s.savedSignatures} (${signatures.size})", style = MaterialTheme.typography.titleMedium)
                         }
                         Button(onClick = { showSigPad = true }) {
-                            Text("New")
+                            Text(if (s.isArabic) "جديد" else "New")
                         }
-                    }
-                    if (signatures.isEmpty()) {
-                        Text(
-                            text = "No saved signatures yet. Draw your handwritten signature once and stamp it onto any PDF offline.",
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }
@@ -265,7 +297,7 @@ fun SettingsAboutScreen(app: PdfProApp) {
                         )
                     }
                     IconButton(onClick = { app.repository.deleteSignature(sig.id) }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = BrandCrimson)
+                        Icon(Icons.Default.Delete, contentDescription = s.delete, tint = BrandCrimson)
                     }
                 }
             }
@@ -283,10 +315,10 @@ fun SettingsAboutScreen(app: PdfProApp) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFF059669))
                         Spacer(Modifier.width(8.dp))
-                        Text("Privacy & Maintenance", style = MaterialTheme.typography.titleMedium)
+                        Text(s.privacyTitle, style = MaterialTheme.typography.titleMedium)
                     }
                     Text(
-                        text = "All PDF rendering, annotation flattening, merging, splitting, compression, encryption, and text extraction execute 100% locally on your Android device.",
+                        text = s.privacyBody,
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -295,7 +327,7 @@ fun SettingsAboutScreen(app: PdfProApp) {
                             val freed = FileHelper.clearTempCache(context)
                             Toast.makeText(
                                 context,
-                                "Cleared ${PageRangeParser.formatFileSize(freed)} of temp cache",
+                                "Cleared ${PageRangeParser.formatFileSize(freed)}",
                                 Toast.LENGTH_SHORT
                             ).show()
                         },
@@ -303,7 +335,7 @@ fun SettingsAboutScreen(app: PdfProApp) {
                     ) {
                         Icon(Icons.Default.CleaningServices, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Clear Temporary Render Cache")
+                        Text(s.clearCache)
                     }
                 }
             }

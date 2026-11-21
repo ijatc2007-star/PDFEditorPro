@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
@@ -15,15 +17,19 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import androidx.exifinterface.media.ExifInterface
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import com.ibrahimjaber.pdfpro.data.AppBranding
 import com.ibrahimjaber.pdfpro.data.CompressionLevel
 import com.ibrahimjaber.pdfpro.data.CompressionResult
+import com.ibrahimjaber.pdfpro.data.HeaderFooterConfig
 import com.ibrahimjaber.pdfpro.data.PageNumberFormat
 import com.ibrahimjaber.pdfpro.data.PageNumberPosition
 import com.ibrahimjaber.pdfpro.data.PageOperationSpec
 import com.ibrahimjaber.pdfpro.data.PageRangeParser
 import com.ibrahimjaber.pdfpro.data.PageTemplate
 import com.ibrahimjaber.pdfpro.data.PdfAnnotation
+import com.ibrahimjaber.pdfpro.data.PdfDiffSummary
 import com.ibrahimjaber.pdfpro.data.PdfMetadata
 import com.ibrahimjaber.pdfpro.data.SearchMatch
 import com.ibrahimjaber.pdfpro.data.ShapeKind
@@ -188,6 +194,12 @@ class PdfEngine(private val context: Context) {
                                         cs.stroke()
                                     }
 
+                                    ShapeKind.LINE -> {
+                                        cs.moveTo(x1, y1)
+                                        cs.lineTo(x2, y2)
+                                        cs.stroke()
+                                    }
+
                                     ShapeKind.ARROW -> {
                                         cs.moveTo(x1, y1)
                                         cs.lineTo(x2, y2)
@@ -205,6 +217,26 @@ class PdfEngine(private val context: Context) {
                                         cs.stroke()
                                     }
                                 }
+                                cs.restoreGraphicsState()
+                            }
+
+                            is PdfAnnotation.MaskRect -> {
+                                cs.saveGraphicsState()
+                                cs.setNonStrokingColor(
+                                    Color.red(ann.fillColorArgb),
+                                    Color.green(ann.fillColorArgb),
+                                    Color.blue(ann.fillColorArgb)
+                                )
+                                val x1 = ox + ann.startX * pageW
+                                val y1 = oy + (1f - ann.startY) * pageH
+                                val x2 = ox + ann.endX * pageW
+                                val y2 = oy + (1f - ann.endY) * pageH
+                                val left = min(x1, x2)
+                                val bottom = min(y1, y2)
+                                val w = max(6f, kotlin.math.abs(x2 - x1))
+                                val h = max(6f, kotlin.math.abs(y2 - y1))
+                                cs.addRect(left, bottom, w, h)
+                                cs.fill()
                                 cs.restoreGraphicsState()
                             }
 
@@ -833,6 +865,232 @@ class PdfEngine(private val context: Context) {
             doc.save(outputFile)
         }
         outputFile
+    }
+
+    /**
+     * Generates an offline QR Code PNG image file using ZXing for stamping onto any PDF page.
+     */
+    suspend fun generateQrCodeImageFile(content: String, sizePx: Int = 420): File =
+        withContext(Dispatchers.IO) {
+            val safe = content.ifBlank { AppBranding.PDF_CREATOR_TAG }
+            val matrix = QRCodeWriter().encode(safe, BarcodeFormat.QR_CODE, sizePx, sizePx)
+            val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+            for (x in 0 until sizePx) {
+                for (y in 0 until sizePx) {
+                    bmp.setPixel(x, y, if (matrix[x, y]) Color.BLACK else Color.WHITE)
+                }
+            }
+            val outFile = File(FileHelper.signaturesDir(context), "qr_${System.currentTimeMillis()}.png")
+            FileOutputStream(outFile).use { fos ->
+                bmp.compress(Bitmap.CompressFormat.PNG, 100, fos)
+            }
+            bmp.recycle()
+            outFile
+        }
+
+    /**
+     * Stamps corporate headers, footers, and legal Bates numbering across every page offline.
+     */
+    suspend fun addHeaderFooterAndBates(
+        inputFile: File,
+        outputFile: File,
+        config: HeaderFooterConfig,
+        password: String? = null
+    ): File = withContext(Dispatchers.IO) {
+        outputFile.parentFile?.mkdirs()
+        PDDocument.load(inputFile, password ?: "").use { doc ->
+            doc.isAllSecurityToBeRemoved = true
+            val font = PDType1Font.HELVETICA
+            val fontSize = 9.5f
+            val total = doc.numberOfPages
+
+            for (i in 0 until total) {
+                val page = doc.getPage(i)
+                val box = page.cropBox ?: page.mediaBox
+                val ox = box.lowerLeftX
+                val oy = box.lowerLeftY
+                val w = box.width
+                val h = box.height
+
+                val batesText = if (config.batesPrefix.isNotBlank()) {
+                    val numStr = (config.batesStart + i).toString().padStart(config.batesDigits.coerceIn(3, 10), '0')
+                    "${config.batesPrefix}$numStr"
+                } else ""
+
+                PDPageContentStream(
+                    doc,
+                    page,
+                    PDPageContentStream.AppendMode.APPEND,
+                    true,
+                    true
+                ).use { cs ->
+                    fun drawStamp(text: String, x: Float, y: Float) {
+                        if (text.isBlank()) return
+                        val safe = text.replace("•", "-").replace("©", "(c)")
+                        if (ConverterCodec.containsArabic(safe)) {
+                            val bmp = renderTextBitmap(
+                                text = safe,
+                                textSizePx = 28f,
+                                colorArgb = Color.rgb(71, 85, 105),
+                                isBold = false,
+                                bgColorArgb = Color.TRANSPARENT,
+                                borderColorArgb = null
+                            )
+                            val img = LosslessFactory.createFromImage(doc, bmp)
+                            val dw = (bmp.width / 3f).coerceAtMost(w * 0.45f)
+                            val dh = (bmp.height / 3f).coerceAtMost(24f)
+                            cs.drawImage(img, x.coerceIn(ox + 12f, ox + w - dw - 12f), y, dw, dh)
+                            bmp.recycle()
+                        } else {
+                            cs.beginText()
+                            cs.setFont(font, fontSize)
+                            cs.setNonStrokingColor(71, 85, 105)
+                            cs.newLineAtOffset(x.coerceIn(ox + 18f, ox + w - 40f), y)
+                            cs.showText(safe)
+                            cs.endText()
+                        }
+                    }
+
+                    val topY = oy + h - 24f
+                    val botY = oy + 18f
+                    drawStamp(config.headerLeft, ox + 28f, topY)
+                    drawStamp(config.headerCenter, ox + w * 0.36f, topY)
+                    drawStamp(config.headerRight, ox + w - 150f, topY)
+                    drawStamp(config.footerLeft, ox + 28f, botY)
+                    if (batesText.isNotBlank()) {
+                        drawStamp(batesText, ox + w - 140f, botY)
+                    }
+                }
+            }
+            doc.documentInformation.creator = AppBranding.PDF_CREATOR_TAG
+            doc.save(outputFile)
+        }
+        outputFile
+    }
+
+    /**
+     * Converts a color PDF to crisp Black & White / Grayscale (saves ink & reduces size).
+     */
+    suspend fun convertToGrayscalePdf(
+        inputFile: File,
+        outputFile: File,
+        dpi: Int = 140,
+        password: String? = null
+    ): CompressionResult = withContext(Dispatchers.IO) {
+        val originalBytes = inputFile.length()
+        val renderFile = ensureUnlockedTempCopy(inputFile, password)
+        outputFile.parentFile?.mkdirs()
+
+        val grayPaint = Paint().apply {
+            val cm = ColorMatrix().apply { setSaturation(0f) }
+            colorFilter = ColorMatrixColorFilter(cm)
+        }
+
+        try {
+            ParcelFileDescriptor.open(renderFile, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                PdfRenderer(pfd).use { renderer ->
+                    PDDocument().use { outDoc ->
+                        val scale = dpi / 72f
+                        for (i in 0 until renderer.pageCount) {
+                            renderer.openPage(i).use { rPage ->
+                                val ptW = rPage.width.toFloat()
+                                val ptH = rPage.height.toFloat()
+                                val bmpW = (ptW * scale).toInt().coerceIn(280, 2000)
+                                val bmpH = (ptH * scale).toInt().coerceIn(280, 2600)
+                                val colorBmp = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+                                colorBmp.eraseColor(Color.WHITE)
+                                rPage.render(colorBmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+
+                                val grayBmp = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+                                Canvas(grayBmp).drawBitmap(colorBmp, 0f, 0f, grayPaint)
+                                colorBmp.recycle()
+
+                                val outPage = PDPage(PDRectangle(ptW, ptH))
+                                outDoc.addPage(outPage)
+                                val pdImg = JPEGFactory.createFromImage(outDoc, grayBmp, 0.78f)
+                                PDPageContentStream(outDoc, outPage).use { cs ->
+                                    cs.drawImage(pdImg, 0f, 0f, ptW, ptH)
+                                }
+                                grayBmp.recycle()
+                            }
+                        }
+                        outDoc.documentInformation.creator = AppBranding.PDF_CREATOR_TAG
+                        outDoc.save(outputFile)
+                    }
+                }
+            }
+        } finally {
+            if (renderFile != inputFile) renderFile.delete()
+        }
+
+        CompressionResult(outputFile.absolutePath, originalBytes, outputFile.length())
+    }
+
+    /**
+     * Compares two PDF files page-by-page offline and returns a detailed diff summary.
+     */
+    suspend fun comparePdfs(fileA: File, fileB: File): PdfDiffSummary = withContext(Dispatchers.IO) {
+        val pagesA = mutableListOf<String>()
+        val pagesB = mutableListOf<String>()
+
+        PDDocument.load(fileA).use { docA ->
+            val stripper = PDFTextStripper()
+            for (i in 1..docA.numberOfPages) {
+                stripper.startPage = i; stripper.endPage = i
+                pagesA.add(stripper.getText(docA).trim())
+            }
+        }
+        PDDocument.load(fileB).use { docB ->
+            val stripper = PDFTextStripper()
+            for (i in 1..docB.numberOfPages) {
+                stripper.startPage = i; stripper.endPage = i
+                pagesB.add(stripper.getText(docB).trim())
+            }
+        }
+
+        val maxPages = max(pagesA.size, pagesB.size)
+        var identical = 0
+        val changed = mutableListOf<Int>()
+        val sb = StringBuilder()
+        sb.append("PDF Comparison Report — ${AppBranding.CREDIT_LINE}\n")
+        sb.append("Document A: ${fileA.name} (${pagesA.size} pages)\n")
+        sb.append("Document B: ${fileB.name} (${pagesB.size} pages)\n")
+        sb.append("--------------------------------------------------\n")
+
+        for (i in 0 until maxPages) {
+            val a = pagesA.getOrNull(i)
+            val b = pagesB.getOrNull(i)
+            if (a == b) {
+                identical++
+            } else {
+                changed.add(i + 1)
+                sb.append("\n[Page ${i + 1} Differs]\n")
+                if (a == null) {
+                    sb.append("  + Added page in Document B (${b?.length ?: 0} chars)\n")
+                } else if (b == null) {
+                    sb.append("  - Removed page from Document A (${a.length} chars)\n")
+                } else {
+                    val linesA = a.lines().map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+                    val linesB = b.lines().map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+                    val removed = (linesA - linesB).take(4)
+                    val added = (linesB - linesA).take(4)
+                    removed.forEach { sb.append("  - A: ${it.take(90)}\n") }
+                    added.forEach { sb.append("  + B: ${it.take(90)}\n") }
+                }
+            }
+        }
+
+        if (changed.isEmpty()) {
+            sb.append("\nAll $maxPages page(s) have identical text content.\n")
+        }
+
+        PdfDiffSummary(
+            fileAPages = pagesA.size,
+            fileBPages = pagesB.size,
+            identicalPages = identical,
+            changedPages = changed,
+            reportText = sb.toString()
+        )
     }
 
     /**

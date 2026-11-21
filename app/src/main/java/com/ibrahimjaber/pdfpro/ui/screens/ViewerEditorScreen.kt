@@ -126,6 +126,7 @@ import androidx.compose.ui.unit.sp
 import com.ibrahimjaber.pdfpro.PdfProApp
 import com.ibrahimjaber.pdfpro.data.AppBranding
 import com.ibrahimjaber.pdfpro.data.EditorTool
+import com.ibrahimjaber.pdfpro.data.LocalStrings
 import com.ibrahimjaber.pdfpro.data.NormPoint
 import com.ibrahimjaber.pdfpro.data.PdfAnnotation
 import com.ibrahimjaber.pdfpro.data.PdfDocumentItem
@@ -164,7 +165,11 @@ private val PRESET_STAMPS = listOf(
     "DRAFT",
     "URGENT",
     "VERIFIED",
-    "IBRAHIM JABER 2026"
+    "IBRAHIM JABER 2026",
+    "معتمد",
+    "سري للغاية",
+    "عاجل",
+    "إبراهيم جابر 2026"
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -177,6 +182,7 @@ fun ViewerEditorScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val strings = LocalStrings.current
     val settings by app.repository.settings.collectAsState()
     val allBookmarks by app.repository.bookmarks.collectAsState()
     val savedSignatures by app.repository.signatures.collectAsState()
@@ -210,6 +216,26 @@ fun ViewerEditorScreen(
     var strokeWidthFactor by remember { mutableFloatStateOf(0.005f) }
     var selectedStamp by remember { mutableStateOf(PRESET_STAMPS[0]) }
     var selectedSignaturePath by remember { mutableStateOf<String?>(null) }
+    var selectedOverlayImagePath by remember { mutableStateOf<String?>(null) }
+    var pendingQrTap by remember { mutableStateOf<NormPoint?>(null) }
+
+    val pickOverlayImageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                val copied = FileHelper.copyImageFromUriToCache(context, uri, 0)
+                if (copied != null) {
+                    selectedOverlayImagePath = copied.absolutePath
+                    Toast.makeText(
+                        context,
+                        if (strings.isArabic) "اضغط على الصفحة لوضع الصورة" else "Tap anywhere on the page to place the image",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
 
     val annotations = remember { mutableStateListOf<PdfAnnotation>() }
     val redoStack = remember { mutableStateListOf<PdfAnnotation>() }
@@ -518,8 +544,21 @@ fun ViewerEditorScreen(
                                             }
                                             if (tool == EditorTool.STAMP) showStampPicker = true
                                             if (tool == EditorTool.SIGNATURE) showSignaturePicker = true
+                                            if (tool == EditorTool.IMAGE_STAMP) pickOverlayImageLauncher.launch(arrayOf("image/*"))
+                                            if (tool == EditorTool.QR_CODE) {
+                                                Toast.makeText(
+                                                    context,
+                                                    if (strings.isArabic) "اضغط على الصفحة لإنشاء ووضع رمز QR" else "Tap anywhere on the page to place a QR Code",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
                                         },
-                                        label = { Text(tool.label, fontSize = 11.5.sp) }
+                                        label = {
+                                            Text(
+                                                if (strings.isArabic) tool.labelAr else tool.label,
+                                                fontSize = 11.5.sp
+                                            )
+                                        }
                                     )
                                 }
                             }
@@ -576,7 +615,7 @@ fun ViewerEditorScreen(
                                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                         modifier = Modifier.height(34.dp)
                                     ) {
-                                        Text("Save", fontSize = 12.sp)
+                                        Text(strings.save, fontSize = 12.sp)
                                     }
                                 }
                             }
@@ -700,7 +739,16 @@ fun ViewerEditorScreen(
                                 )
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(Color.White)
-                                .pointerInput(activeTool, editMode, selectedColor, strokeWidthFactor, selectedStamp, selectedSignaturePath, currentPage) {
+                                .pointerInput(
+                                    activeTool,
+                                    editMode,
+                                    selectedColor,
+                                    strokeWidthFactor,
+                                    selectedStamp,
+                                    selectedSignaturePath,
+                                    selectedOverlayImagePath,
+                                    currentPage
+                                ) {
                                     if (!editMode) return@pointerInput
                                     when (activeTool) {
                                         EditorTool.PEN, EditorTool.HIGHLIGHTER -> {
@@ -734,7 +782,13 @@ fun ViewerEditorScreen(
                                             )
                                         }
 
-                                        EditorTool.RECTANGLE, EditorTool.OVAL, EditorTool.ARROW -> {
+                                        EditorTool.RECTANGLE,
+                                        EditorTool.OVAL,
+                                        EditorTool.ARROW,
+                                        EditorTool.UNDERLINE,
+                                        EditorTool.STRIKETHROUGH,
+                                        EditorTool.REDACT,
+                                        EditorTool.WHITEOUT -> {
                                             detectDragGestures(
                                                 onDragStart = { offset ->
                                                     val pt = NormPoint(
@@ -746,32 +800,71 @@ fun ViewerEditorScreen(
                                                 },
                                                 onDrag = { change, _ ->
                                                     change.consume()
-                                                    activeShapeEnd = NormPoint(
-                                                        (change.position.x / size.width).coerceIn(0f, 1f),
+                                                    val nx = (change.position.x / size.width).coerceIn(0f, 1f)
+                                                    val ny = if (activeTool == EditorTool.UNDERLINE || activeTool == EditorTool.STRIKETHROUGH) {
+                                                        activeShapeStart?.y ?: (change.position.y / size.height).coerceIn(0f, 1f)
+                                                    } else {
                                                         (change.position.y / size.height).coerceIn(0f, 1f)
-                                                    )
+                                                    }
+                                                    activeShapeEnd = NormPoint(nx, ny)
                                                 },
                                                 onDragEnd = {
                                                     val s = activeShapeStart
                                                     val e = activeShapeEnd
                                                     if (s != null && e != null) {
-                                                        val kind = when (activeTool) {
-                                                            EditorTool.RECTANGLE -> ShapeKind.RECTANGLE
-                                                            EditorTool.OVAL -> ShapeKind.OVAL
-                                                            else -> ShapeKind.ARROW
+                                                        when (activeTool) {
+                                                            EditorTool.REDACT -> {
+                                                                annotations.add(
+                                                                    PdfAnnotation.MaskRect(
+                                                                        pageIndex = currentPage,
+                                                                        startX = s.x,
+                                                                        startY = s.y,
+                                                                        endX = e.x,
+                                                                        endY = e.y,
+                                                                        fillColorArgb = android.graphics.Color.BLACK,
+                                                                        isRedaction = true
+                                                                    )
+                                                                )
+                                                            }
+                                                            EditorTool.WHITEOUT -> {
+                                                                annotations.add(
+                                                                    PdfAnnotation.MaskRect(
+                                                                        pageIndex = currentPage,
+                                                                        startX = s.x,
+                                                                        startY = s.y,
+                                                                        endX = e.x,
+                                                                        endY = e.y,
+                                                                        fillColorArgb = android.graphics.Color.WHITE,
+                                                                        isRedaction = false
+                                                                    )
+                                                                )
+                                                            }
+                                                            else -> {
+                                                                val kind = when (activeTool) {
+                                                                    EditorTool.RECTANGLE -> ShapeKind.RECTANGLE
+                                                                    EditorTool.OVAL -> ShapeKind.OVAL
+                                                                    EditorTool.UNDERLINE, EditorTool.STRIKETHROUGH -> ShapeKind.LINE
+                                                                    else -> ShapeKind.ARROW
+                                                                }
+                                                                val col = if (activeTool == EditorTool.STRIKETHROUGH) {
+                                                                    Color(0xFFDC2626).toArgb()
+                                                                } else {
+                                                                    selectedColor.toArgb()
+                                                                }
+                                                                annotations.add(
+                                                                    PdfAnnotation.Shape(
+                                                                        pageIndex = currentPage,
+                                                                        kind = kind,
+                                                                        startX = s.x,
+                                                                        startY = s.y,
+                                                                        endX = e.x,
+                                                                        endY = e.y,
+                                                                        colorArgb = col,
+                                                                        strokeWidthNorm = strokeWidthFactor
+                                                                    )
+                                                                )
+                                                            }
                                                         }
-                                                        annotations.add(
-                                                            PdfAnnotation.Shape(
-                                                                pageIndex = currentPage,
-                                                                kind = kind,
-                                                                startX = s.x,
-                                                                startY = s.y,
-                                                                endX = e.x,
-                                                                endY = e.y,
-                                                                colorArgb = selectedColor.toArgb(),
-                                                                strokeWidthNorm = strokeWidthFactor
-                                                            )
-                                                        )
                                                         redoStack.clear()
                                                     }
                                                     activeShapeStart = null
@@ -780,7 +873,12 @@ fun ViewerEditorScreen(
                                             )
                                         }
 
-                                        EditorTool.TEXT, EditorTool.STAMP, EditorTool.STICKY_NOTE, EditorTool.SIGNATURE -> {
+                                        EditorTool.TEXT,
+                                        EditorTool.STAMP,
+                                        EditorTool.STICKY_NOTE,
+                                        EditorTool.SIGNATURE,
+                                        EditorTool.IMAGE_STAMP,
+                                        EditorTool.QR_CODE -> {
                                             detectTapGestures { offset ->
                                                 val pt = NormPoint(
                                                     (offset.x / size.width).coerceIn(0f, 1f),
@@ -789,6 +887,7 @@ fun ViewerEditorScreen(
                                                 when (activeTool) {
                                                     EditorTool.TEXT -> pendingTextTap = pt
                                                     EditorTool.STICKY_NOTE -> pendingNoteTap = pt
+                                                    EditorTool.QR_CODE -> pendingQrTap = pt
                                                     EditorTool.STAMP -> {
                                                         annotations.add(
                                                             PdfAnnotation.Stamp(
@@ -800,6 +899,24 @@ fun ViewerEditorScreen(
                                                             )
                                                         )
                                                         redoStack.clear()
+                                                    }
+                                                    EditorTool.IMAGE_STAMP -> {
+                                                        val imgPath = selectedOverlayImagePath
+                                                        if (imgPath != null) {
+                                                            annotations.add(
+                                                                PdfAnnotation.Signature(
+                                                                    pageIndex = currentPage,
+                                                                    x = pt.x,
+                                                                    y = pt.y,
+                                                                    widthNorm = 0.28f,
+                                                                    heightNorm = 0.20f,
+                                                                    imagePath = imgPath
+                                                                )
+                                                            )
+                                                            redoStack.clear()
+                                                        } else {
+                                                            pickOverlayImageLauncher.launch(arrayOf("image/*"))
+                                                        }
                                                     }
                                                     EditorTool.SIGNATURE -> {
                                                         val sigPath = selectedSignaturePath ?: savedSignatures.firstOrNull()?.imagePath
@@ -881,6 +998,9 @@ fun ViewerEditorScreen(
                                                 style = stroke
                                             )
                                         }
+                                        ShapeKind.LINE -> {
+                                            drawLine(color, Offset(x1, y1), Offset(x2, y2), strokeWidth = stroke.width, cap = StrokeCap.Round)
+                                        }
                                         ShapeKind.ARROW -> {
                                             drawLine(color, Offset(x1, y1), Offset(x2, y2), strokeWidth = stroke.width, cap = StrokeCap.Round)
                                             val angle = atan2((y2 - y1).toDouble(), (x2 - x1).toDouble())
@@ -921,6 +1041,17 @@ fun ViewerEditorScreen(
                                             Color(ann.colorArgb),
                                             ann.strokeWidthNorm
                                         )
+                                        is PdfAnnotation.MaskRect -> {
+                                            val x1 = ann.startX * w
+                                            val y1 = ann.startY * h
+                                            val x2 = ann.endX * w
+                                            val y2 = ann.endY * h
+                                            drawRect(
+                                                color = Color(ann.fillColorArgb),
+                                                topLeft = Offset(min(x1, x2), min(y1, y2)),
+                                                size = Size(max(8f, kotlin.math.abs(x2 - x1)), max(8f, kotlin.math.abs(y2 - y1)))
+                                            )
+                                        }
                                         is PdfAnnotation.Signature -> {
                                             val sigBmp = signatureBitmaps[ann.imagePath]
                                             if (sigBmp != null) {
@@ -981,12 +1112,25 @@ fun ViewerEditorScreen(
                                 val s = activeShapeStart
                                 val e = activeShapeEnd
                                 if (s != null && e != null) {
-                                    val kind = when (activeTool) {
-                                        EditorTool.RECTANGLE -> ShapeKind.RECTANGLE
-                                        EditorTool.OVAL -> ShapeKind.OVAL
-                                        else -> ShapeKind.ARROW
+                                    if (activeTool == EditorTool.REDACT || activeTool == EditorTool.WHITEOUT) {
+                                        val x1 = s.x * w
+                                        val y1 = s.y * h
+                                        val x2 = e.x * w
+                                        val y2 = e.y * h
+                                        drawRect(
+                                            color = if (activeTool == EditorTool.REDACT) Color.Black.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.9f),
+                                            topLeft = Offset(min(x1, x2), min(y1, y2)),
+                                            size = Size(max(6f, kotlin.math.abs(x2 - x1)), max(6f, kotlin.math.abs(y2 - y1)))
+                                        )
+                                    } else {
+                                        val kind = when (activeTool) {
+                                            EditorTool.RECTANGLE -> ShapeKind.RECTANGLE
+                                            EditorTool.OVAL -> ShapeKind.OVAL
+                                            EditorTool.UNDERLINE, EditorTool.STRIKETHROUGH -> ShapeKind.LINE
+                                            else -> ShapeKind.ARROW
+                                        }
+                                        drawShapePreview(kind, s.x, s.y, e.x, e.y, selectedColor, strokeWidthFactor)
                                     }
-                                    drawShapePreview(kind, s.x, s.y, e.x, e.y, selectedColor, strokeWidthFactor)
                                 }
                             }
 
@@ -1053,6 +1197,50 @@ fun ViewerEditorScreen(
                 }
             }
         }
+    }
+
+    // QR Code Stamp Dialog (Offline ZXing)
+    pendingQrTap?.let { tapPt ->
+        var qrText by remember { mutableStateOf(AppBranding.PDF_CREATOR_TAG) }
+        AlertDialog(
+            onDismissRequest = { pendingQrTap = null },
+            title = { Text(if (strings.isArabic) "إنشاء وختم رمز QR" else "Insert Offline QR Code Stamp") },
+            text = {
+                OutlinedTextField(
+                    value = qrText,
+                    onValueChange = { qrText = it },
+                    label = { Text(if (strings.isArabic) "الرابط أو النص أو رقم المعاملة" else "Text, URL, or Document ID") },
+                    minLines = 2
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val content = qrText.trim()
+                    pendingQrTap = null
+                    scope.launch {
+                        runCatching {
+                            val qrFile = app.pdfEngine.generateQrCodeImageFile(content)
+                            annotations.add(
+                                PdfAnnotation.Signature(
+                                    pageIndex = currentPage,
+                                    x = tapPt.x,
+                                    y = tapPt.y,
+                                    widthNorm = 0.20f,
+                                    heightNorm = 0.145f,
+                                    imagePath = qrFile.absolutePath
+                                )
+                            )
+                            redoStack.clear()
+                        }.onFailure {
+                            Toast.makeText(context, "QR error: ${it.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }) { Text(if (strings.isArabic) "إدراج QR" else "Place QR") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingQrTap = null }) { Text(strings.cancel) }
+            }
+        )
     }
 
     // Password Dialog for Encrypted PDFs

@@ -8,11 +8,16 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.lifecycleScope
+import com.ibrahimjaber.pdfpro.data.LocalStrings
 import com.ibrahimjaber.pdfpro.data.PdfDocumentItem
+import com.ibrahimjaber.pdfpro.data.stringsFor
 import com.ibrahimjaber.pdfpro.engine.FileHelper
 import com.ibrahimjaber.pdfpro.ui.navigation.PdfProNavHost
 import com.ibrahimjaber.pdfpro.ui.theme.PdfProTheme
@@ -20,8 +25,8 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * Main Activity for PDF Pro Studio — 100% Offline PDF Viewer & Pro Editor.
- * Programmed by Ibrahim Jaber 2026.
+ * Main Activity for PDF Pro Studio v2.0 — 100% Offline PDF Viewer, Editor & Universal Converter.
+ * Programmed by Ibrahim Jaber 2026 | برمجة إبراهيم جابر 2026
  */
 class MainActivity : ComponentActivity() {
 
@@ -37,12 +42,20 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val settings by app.repository.settings.collectAsState()
+            val uiStrings = stringsFor(settings.language)
+            val layoutDir = if (settings.language.isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+
             PdfProTheme(themeMode = settings.themeMode) {
-                PdfProNavHost(
-                    app = app,
-                    pendingOpenPath = pendingOpenPath.value,
-                    onConsumedOpenPath = { pendingOpenPath.value = null }
-                )
+                CompositionLocalProvider(
+                    LocalStrings provides uiStrings,
+                    LocalLayoutDirection provides layoutDir
+                ) {
+                    PdfProNavHost(
+                        app = app,
+                        pendingOpenPath = pendingOpenPath.value,
+                        onConsumedOpenPath = { pendingOpenPath.value = null }
+                    )
+                }
             }
         }
     }
@@ -84,10 +97,10 @@ class MainActivity : ComponentActivity() {
             Intent.ACTION_SEND -> {
                 val uri = getParcelableUri(intent, Intent.EXTRA_STREAM) ?: return
                 val mime = intent.type.orEmpty()
-                if (mime.contains("pdf", ignoreCase = true)) {
-                    importAndOpenPdf(uri, app)
-                } else if (mime.startsWith("image/", ignoreCase = true)) {
-                    convertImagesAndOpen(listOf(uri), app)
+                when {
+                    mime.contains("pdf", ignoreCase = true) -> importAndOpenPdf(uri, app)
+                    mime.startsWith("image/", ignoreCase = true) -> convertImagesAndOpen(listOf(uri), app)
+                    else -> convertSharedOfficeOrTextToPdf(uri, app)
                 }
             }
 
@@ -117,6 +130,34 @@ class MainActivity : ComponentActivity() {
                 pendingOpenPath.value = imported.absolutePath
             } else {
                 Toast.makeText(this@MainActivity, "Could not open PDF", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun convertSharedOfficeOrTextToPdf(uri: Uri, app: PdfProApp) {
+        lifecycleScope.launch {
+            val cached = FileHelper.copyAnyFileFromUriToCache(this@MainActivity, uri) ?: return@launch
+            runCatching {
+                val outPdf = FileHelper.uniqueFile(FileHelper.pdfsDir(this@MainActivity), "${cached.nameWithoutExtension}.pdf")
+                when (cached.extension.lowercase()) {
+                    "docx" -> app.converterEngine.docxToPdf(cached, outPdf)
+                    "xlsx" -> app.converterEngine.xlsxToPdf(cached, outPdf)
+                    "csv" -> app.converterEngine.csvToPdf(cached, outPdf)
+                    "pptx" -> app.converterEngine.pptxToPdf(cached, outPdf)
+                    else -> app.converterEngine.textOrHtmlToPdf(cached, outPdf)
+                }
+                val info = app.pdfEngine.inspectDocument(outPdf)
+                app.repository.upsertDocument(
+                    PdfDocumentItem(
+                        name = outPdf.name,
+                        path = outPdf.absolutePath,
+                        sizeBytes = info.sizeBytes,
+                        pageCount = info.pageCount
+                    )
+                )
+                pendingOpenPath.value = outPdf.absolutePath
+            }.onFailure {
+                Toast.makeText(this@MainActivity, "Conversion failed: ${it.message}", Toast.LENGTH_LONG).show()
             }
         }
     }

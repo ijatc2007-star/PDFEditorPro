@@ -57,6 +57,20 @@ object FileHelper {
         }.getOrNull()
     }
 
+    fun copyAnyFileFromUriToCache(context: Context, uri: Uri): File? {
+        val rawName = queryDisplayName(context, uri, "file_${System.currentTimeMillis()}")
+        val safeName = rawName.replace(Regex("[^a-zA-Z0-9._\\-\\u0600-\\u06FF ]"), "_")
+        val destFile = uniqueFile(context.cacheDir, safeName)
+        return runCatching {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(destFile).use { output ->
+                    input.copyTo(output)
+                }
+            } ?: return null
+            destFile
+        }.getOrNull()
+    }
+
     fun exportFileToUri(context: Context, sourceFile: File, targetUri: Uri): Boolean {
         return runCatching {
             context.contentResolver.openOutputStream(targetUri)?.use { output ->

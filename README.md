@@ -1,53 +1,32 @@
-# PDF Pro Studio — Complete Offline Android PDF Viewer & Editor
-
-**Programmed by Ibrahim Jaber 2026**  
+# PDF Pro Studio v2.0 — Android (.apk) & Windows PC (.exe)
+**Programmed by Ibrahim Jaber 2026 | برمجة إبراهيم جابر 2026**  
 `© 2026 Ibrahim Jaber. All Rights Reserved.`
 
-A native, 100% **offline** Android PDF Viewer & Pro Editor built with **Kotlin**, **Jetpack Compose (Material 3)**, **Android `PdfRenderer`**, and **Apache PDFBox-Android**.  
-No `INTERNET` permission is declared — every document stays private on your device.
+A complete, 100% **offline** cross-platform **PDF Viewer, Commercial-Grade Pro Editor, and Universal Format Converter** for both **Android (`.apk`)** and **Windows PC (`.exe`)**, with full **English & Arabic (العربية RTL)** bilingual support.
 
 ---
 
-## Complete Feature Set (All 100% Offline)
+## Highlights (100% Offline • Zero Internet Permission)
 
-### 1. Pro PDF Viewer & Reading Experience
-- **Crisp Native Rendering:** Hardware-accelerated `PdfRenderer` with LRU bitmap caching.
-- **Pinch-to-Zoom & Pan:** Smooth 1×–5× zoom and pan gestures.
-- **Reading Modes:** Day, warm Sepia, and Night (inverted color matrix) modes.
-- **Offline Keyword Search:** Search text across every page and jump directly to hits.
-- **Bookmarks & Last-Page Memory:** Bookmark pages and automatically resume where you left off.
-- **Offline Read Aloud (TTS):** Listen to any PDF page using Android Text-to-Speech.
-- **Direct Open & Share:** Open PDFs directly from File Managers, WhatsApp, or Email (`ACTION_VIEW` / `ACTION_SEND`), print via Android Print Framework, or export copies via Storage Access Framework.
+### 1. Universal Offline Format Converter
+- **From PDF (`من PDF`):** PDF → **Word (`.docx`)**, **Excel (`.xlsx`)**, **CSV (Arabic UTF-8 BOM)**, **PowerPoint (`.pptx`)**, **PNG / JPEG Images**, **HTML**, and **TXT**.
+- **To PDF (`إلى PDF`):** **Word (`.docx`)**, **Excel (`.xlsx`)**, **CSV**, **PowerPoint (`.pptx`)**, **Images (JPG/PNG/WEBP/BMP)**, **HTML**, **Markdown**, and **TXT** → paginated PDF with full Arabic RTL shaping.
+- **Direct Office Conversions:** **CSV ↔ Excel (`.xlsx`)** offline.
 
-### 2. Interactive Pro PDF Editor (Permanently Embedded into PDF)
-- **Freehand Pen & Semi-Transparent Highlighter** with custom color swatches and stroke widths.
-- **Vector Shapes:** Rectangles, Ovals/Circles, and directional Arrows.
-- **Text Boxes (English & Arabic Unicode support):** Custom font size, color, and bold styling.
-- **Pro Stamps:** `APPROVED`, `CONFIDENTIAL`, `DRAFT`, `URGENT`, `VERIFIED`, and `IBRAHIM JABER 2026`.
-- **Sticky Notes** and **Handwritten Signature Pad** (draw once, save reusable transparent PNG signatures, stamp anywhere).
-- **Undo / Redo** stack + **Save Over Original** or **Save Copy**.
+### 2. Commercial-Grade Pro PDF Editor
+- **True Redaction (Blackout Sensitive Data)** & **Whiteout Eraser Patch**
+- **Freehand Pen**, **Semi-Transparent Highlighter**, **Underline**, and **Strikethrough**
+- **Text Boxes** (full English & Arabic RTL support), **Sticky Notes**, **Shapes** (Rectangle, Oval, Arrow)
+- **Pro Stamps** (`APPROVED`, `CONFIDENTIAL`, `DRAFT`, `URGENT`, `VERIFIED`, `معتمد`, `سري للغاية`, `عاجل`, `IBRAHIM JABER 2026`, `إبراهيم جابر 2026`)
+- **Insert Image / Logo**, **Offline QR Code Stamp Generator**, and **Handwritten Signature Pad**
+- **Undo / Redo**, **Save Over Original**, and **Save As Copy**
 
-### 3. 12 Offline Pro PDF Tools
-1. **Merge PDFs** — Combine multiple PDFs in custom order.
-2. **Split PDF** — Extract custom page ranges (e.g., `1-3, 5, 8-10`) or split every page into separate PDFs.
-3. **Visual Page Organizer** — Thumbnail grid to reorder, rotate 90°, duplicate, delete, or insert blank A4 pages.
-4. **Images to PDF** — Convert multiple gallery photos (with EXIF auto-rotation) into clean A4 PDFs.
-5. **PDF to Images** — Export PDF pages as high-resolution PNG or JPEG images.
-6. **Compress PDF** — Light, Balanced, or Maximum offline compression with before/after size savings.
-7. **Protect PDF** — Lock PDFs with AES-128 password encryption and printing/copying permissions.
-8. **Unlock PDF** — Remove password protection from encrypted PDFs.
-9. **Watermark PDF** — Diagonal or tiled custom watermarks (English & Arabic) with adjustable opacity.
-10. **Add Page Numbers** — Stamp formatted page numbers (`1, 2, 3`, `Page 1 of 10`, `- 1 -`).
-11. **Extract Text** — Extract full selectable PDF text, copy to clipboard, or save `.txt`.
-12. **Metadata Editor & Create New PDF** — Edit PDF Title/Author/Subject/Keywords or create Blank, Lined, Grid, and Text PDFs from scratch.
+### 3. 16 Offline Pro PDF Tools
+1. Format Converter  2. Merge PDFs  3. Split PDF  4. Visual Page Organizer  5. Images → PDF  6. PDF → Images  7. Compress PDF  8. Grayscale / B&W Optimizer  9. Protect PDF (AES-128 Android / AES-256 PC)  10. Unlock PDF  11. Watermark PDF (EN/AR, Diagonal/Tiled)  12. Page Numbers  13. Corporate Headers, Footers & Legal Bates Numbering  14. Compare Two PDFs (Page-by-Page Diff Report)  15. Extract Text & Full-Text Search  16. Metadata Editor & Create New PDF
 
 ---
 
-## Building the APK
-
-### Automated Build (GitHub Actions)
-Every push to `main` automatically runs `gradle testDebugUnitTest` and `gradle assembleDebug` and uploads `PDFProStudio-IbrahimJaber2026-Debug-APK` in the **Actions** tab.
-
-### Local Build (Android Studio)
-1. Open this folder in **Android Studio** (JDK 17, Android SDK 35).
-2. Run `./gradlew assembleDebug` (or click **Run**).
+## Automated Builds (Android APK + Windows PC EXE)
+Every push to `main` builds and tests **both** platforms automatically via GitHub Actions:
+- **Android APK:** `PDFProStudio-IbrahimJaber2026-Android-APK` (`ubuntu-latest`, Kotlin + Jetpack Compose + PDFBox-Android)
+- **Windows PC EXE:** `PDFProStudio-PC-IbrahimJaber2026-Windows-EXE` (`windows-latest`, Standalone single-file `PDFProStudio-PC-IbrahimJaber2026.exe` powered by PyMuPDF + CustomTkinter)
