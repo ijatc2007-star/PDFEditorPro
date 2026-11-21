@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PDF Pro Studio</string>
+    <string name="open_with_pdf_pro">Open with PDF Pro Studio</string>
+    <string name="share_to_pdf_pro">Edit in PDF Pro Studio</string>
+    <string name="convert_images_to_pdf">Convert to PDF (PDF Pro Studio)</string>
+    <string name="developer_credit">Programmed by Ibrahim Jaber 2026</string>
+</resources>
