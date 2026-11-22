@@ -21,11 +21,13 @@ import com.ibrahimjaber.pdfpro.data.stringsFor
 import com.ibrahimjaber.pdfpro.engine.FileHelper
 import com.ibrahimjaber.pdfpro.ui.navigation.PdfProNavHost
 import com.ibrahimjaber.pdfpro.ui.theme.PdfProTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Main Activity for PDF Pro Studio v2.0 — 100% Offline PDF Viewer, Editor & Universal Converter.
+ * Main Activity for PDF Editor Pro v5.1 — Offline PDF Viewer, Editor, CamScanner, Camera Translate & Large-PDF AI.
  * Programmed by Ibrahim Jaber 2026 | برمجة إبراهيم جابر 2026
  */
 class MainActivity : ComponentActivity() {
@@ -115,7 +117,7 @@ class MainActivity : ComponentActivity() {
 
     private fun importAndOpenPdf(uri: Uri, app: PdfProApp) {
         lifecycleScope.launch {
-            val imported = FileHelper.importPdfFromUri(this@MainActivity, uri)
+            val imported = withContext(Dispatchers.IO) { FileHelper.importPdfFromUri(this@MainActivity, uri) }
             if (imported != null) {
                 val info = app.pdfEngine.inspectDocument(imported)
                 app.repository.upsertDocument(
@@ -136,7 +138,7 @@ class MainActivity : ComponentActivity() {
 
     private fun convertSharedOfficeOrTextToPdf(uri: Uri, app: PdfProApp) {
         lifecycleScope.launch {
-            val cached = FileHelper.copyAnyFileFromUriToCache(this@MainActivity, uri) ?: return@launch
+            val cached = withContext(Dispatchers.IO) { FileHelper.copyAnyFileFromUriToCache(this@MainActivity, uri) } ?: return@launch
             runCatching {
                 val outPdf = FileHelper.uniqueFile(FileHelper.pdfsDir(this@MainActivity), "${cached.nameWithoutExtension}.pdf")
                 when (cached.extension.lowercase()) {
@@ -164,8 +166,10 @@ class MainActivity : ComponentActivity() {
 
     private fun convertImagesAndOpen(uris: List<Uri>, app: PdfProApp) {
         lifecycleScope.launch {
-            val imgFiles = uris.mapIndexedNotNull { idx, uri ->
-                FileHelper.copyImageFromUriToCache(this@MainActivity, uri, idx)
+            val imgFiles = withContext(Dispatchers.IO) {
+                uris.mapIndexedNotNull { idx, uri ->
+                    FileHelper.copyImageFromUriToCache(this@MainActivity, uri, idx)
+                }
             }
             if (imgFiles.isEmpty()) return@launch
             runCatching {

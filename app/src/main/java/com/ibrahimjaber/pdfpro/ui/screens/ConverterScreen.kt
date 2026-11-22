@@ -64,7 +64,9 @@ import com.ibrahimjaber.pdfpro.data.PdfDocumentItem
 import com.ibrahimjaber.pdfpro.engine.FileHelper
 import com.ibrahimjaber.pdfpro.ui.theme.BrandCrimson
 import com.ibrahimjaber.pdfpro.ui.theme.BrandEmerald
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 @Composable
@@ -92,7 +94,7 @@ fun ConverterScreen(
     val pickPdf = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
-                val imported = FileHelper.importPdfFromUri(context, uri)
+                val imported = withContext(Dispatchers.IO) { FileHelper.importPdfFromUri(context, uri) }
                 if (imported != null) {
                     val info = app.pdfEngine.inspectDocument(imported)
                     app.repository.upsertDocument(
@@ -116,7 +118,7 @@ fun ConverterScreen(
     val pickAnyFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
-                val cached = FileHelper.copyAnyFileFromUriToCache(context, uri)
+                val cached = withContext(Dispatchers.IO) { FileHelper.copyAnyFileFromUriToCache(context, uri) }
                 if (cached != null) {
                     selectedFile = cached
                     selectedImages = emptyList()
@@ -130,8 +132,10 @@ fun ConverterScreen(
     val pickImages = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
             scope.launch {
-                val files = uris.mapIndexedNotNull { idx, uri ->
-                    FileHelper.copyImageFromUriToCache(context, uri, idx)
+                val files = withContext(Dispatchers.IO) {
+                    uris.mapIndexedNotNull { idx, uri ->
+                        FileHelper.copyImageFromUriToCache(context, uri, idx)
+                    }
                 }
                 selectedImages = files
                 selectedFile = null

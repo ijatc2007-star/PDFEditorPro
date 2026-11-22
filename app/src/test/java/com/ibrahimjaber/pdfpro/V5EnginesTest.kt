@@ -46,4 +46,21 @@ class V5EnginesTest {
         val arQa = OfflineAiPdfEngine.askQuestionIndexed(index, "التوقيع الرقمي والترجمة الفورية")
         assertTrue("Expected Arabic Q&A to cite page 115", arQa.passages.any { it.pageIndex == 114 })
     }
+
+    @Test
+    fun arabEyesSqlDictionaryRowRegexParsesCleanly() {
+        val sampleLines = listOf(
+            "(1, '10th', 'العاشر'),",
+            "(42, 'Agreement', 'اتفاقية::عقد'),",
+            "(999, 'Security', 'أمن::حماية');"
+        )
+        val regex = Regex("\\(\\d+,\\s*'([^']{1,60})',\\s*'([^']{1,160})'\\)")
+        val parsed = sampleLines.mapNotNull { line ->
+            regex.find(line)?.let { it.groupValues[1].lowercase() to it.groupValues[2].split("::").first().trim() }
+        }.toMap()
+        assertEquals(3, parsed.size)
+        assertEquals("العاشر", parsed["10th"])
+        assertEquals("اتفاقية", parsed["agreement"])
+        assertEquals("أمن", parsed["security"])
+    }
 }

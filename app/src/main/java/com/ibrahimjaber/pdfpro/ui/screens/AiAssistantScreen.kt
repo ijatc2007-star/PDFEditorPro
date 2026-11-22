@@ -94,6 +94,7 @@ import com.ibrahimjaber.pdfpro.engine.FileHelper
 import com.ibrahimjaber.pdfpro.engine.LargeDocIndex
 import com.ibrahimjaber.pdfpro.engine.LocalGgufModelInfo
 import com.ibrahimjaber.pdfpro.engine.OfflineAiPdfEngine
+import com.ibrahimjaber.pdfpro.engine.OfflinePackStatus
 import com.ibrahimjaber.pdfpro.engine.OfflineTranslatorEngine
 import com.ibrahimjaber.pdfpro.engine.SavedTranslationRecord
 import com.ibrahimjaber.pdfpro.engine.SummaryDepth
@@ -154,10 +155,11 @@ fun AiAssistantScreen(
     var questionInput by remember { mutableStateOf("") }
     val qaHistory = remember { mutableStateListOf<AiQaResponse>() }
 
-    // Downloadable Offline Neural Dictionary & Saved Translations state
-    var neuralPackReady by remember { mutableStateOf(false) }
+    // Downloadable Offline Dual-Engine Dictionary & Saved Translations state
+    var packStatus by remember { mutableStateOf(OfflinePackStatus(false, 0, 0)) }
     var isDownloadingPack by remember { mutableStateOf(false) }
     var packDownloadMsg by remember { mutableStateOf("") }
+    var packDiagnosticMsg by remember { mutableStateOf("") }
     var isTranslating by remember { mutableStateOf(false) }
     var translateProgress by remember { mutableFloatStateOf(0f) }
     var translateEngineLabel by remember { mutableStateOf("") }
@@ -168,7 +170,7 @@ fun AiAssistantScreen(
     var ggufInfo by remember { mutableStateOf<LocalGgufModelInfo?>(null) }
 
     LaunchedEffect(Unit) {
-        neuralPackReady = app.translationManager.areOfflineModelsReady()
+        packStatus = app.translationManager.getOfflinePackStatus()
         savedTranslations = app.translationManager.loadSavedTranslations()
     }
 
@@ -177,7 +179,7 @@ fun AiAssistantScreen(
     ) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
-                val cached = FileHelper.copyAnyFileFromUriToCache(context, uri)
+                val cached = withContext(Dispatchers.IO) { FileHelper.copyAnyFileFromUriToCache(context, uri) }
                 if (cached != null) {
                     ggufInfo = OfflineTranslatorEngine.inspectLocalGgufModel(cached)
                 }
@@ -190,7 +192,7 @@ fun AiAssistantScreen(
     ) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
-                val imported = FileHelper.importPdfFromUri(context, uri)
+                val imported = withContext(Dispatchers.IO) { FileHelper.importPdfFromUri(context, uri) }
                 if (imported != null) {
                     val info = app.pdfEngine.inspectDocument(imported)
                     app.repository.upsertDocument(
@@ -647,31 +649,46 @@ fun AiAssistantScreen(
                         }
                     }
 
-                    // TAB 1: DOWNLOADABLE FULL OFFLINE AR<->EN NEURAL DICTIONARY + TRANSLATE + SAVED HISTORY
+                    // TAB 1: DOWNLOADABLE FULL OFFLINE AR<->EN DUAL-ENGINE DICTIONARY + TRANSLATE + SAVED HISTORY
                     1 -> {
-                        // Offline Neural Language Pack Manager Card
+                        // Offline Dual-Engine Language Pack Manager Card
                         item {
                             Card(
                                 colors = CardDefaults.cardColors(
-                                    containerColor = if (neuralPackReady) BrandEmerald.copy(alpha = 0.12f) else BrandBlue.copy(alpha = 0.10f)
+                                    containerColor = if (packStatus.isAnyFullPackReady) BrandEmerald.copy(alpha = 0.12f) else BrandBlue.copy(alpha = 0.10f)
                                 ),
                                 shape = RoundedCornerShape(16.dp)
                             ) {
                                 Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text(
-                                        text = if (s.isArabic) "القاموس العصبي الكامل (عربي ↔ إنجليزي) — أوفلاين" else "Downloadable Complete AR ↔ EN Neural Dictionary",
+                                        text = if (s.isArabic) "القاموس العربي والإنجليزي الكامل — أوفلاين" else "Downloadable Complete AR ↔ EN Offline Dictionary",
                                         style = MaterialTheme.typography.titleMedium
                                     )
-                                    Text(
-                                        text = if (neuralPackReady) {
-                                            if (s.isArabic) "✓ القاموس العصبي الكامل (عربي + إنجليزي) محمّل وجاهز! الترجمة كاملة وصحيحة 100% بدون إنترنت للملفات والكاميرا."
-                                            else "✓ Complete Arabic & English Neural Translation Pack is installed locally! Full grammatical translation works 100% offline for PDFs & Live Camera."
+                                    val statusSummary = buildString {
+                                        if (s.isArabic) {
+                                            append("• قاموس ArabEyes (87,000+ كلمة): ")
+                                            append(if (packStatus.arabEyesWordCount >= 1000) "✓ محمّل (${packStatus.arabEyesWordCount} كلمة)\n" else "غير محمّل\n")
+                                            append("• النموذج العصبي للجمل الكاملة (ML Kit): ")
+                                            append(if (packStatus.neuralModelReady) "✓ جاهز أوفلاين\n" else "غير محمّل\n")
+                                            append("• ذاكرة الترجمات المحفوظة محلياً: ${packStatus.savedCacheCount}")
                                         } else {
-                                            if (s.isArabic) "نزّل القاموس العربي والإنجليزي الكامل مرة واحدة من الإنترنت (~30 ميجابايت) لتعمل الترجمة الكاملة والصحيحة أوفلاين دائماً وحفظ الترجمات محلياً."
-                                            else "Download the full Arabic & English on-device neural pack once (~30 MB over HTTPS) for accurate, full-sentence offline translation across PDFs and Live Camera."
-                                        },
-                                        fontSize = 12.5.sp
-                                    )
+                                            append("• ArabEyes Full Dictionary (87,000+ words): ")
+                                            append(if (packStatus.arabEyesWordCount >= 1000) "✓ Installed (${packStatus.arabEyesWordCount} words)\n" else "Not downloaded\n")
+                                            append("• Neural Full-Sentence Pack (ML Kit): ")
+                                            append(if (packStatus.neuralModelReady) "✓ Ready Offline\n" else "Not downloaded\n")
+                                            append("• Locally Cached Translations: ${packStatus.savedCacheCount}")
+                                        }
+                                    }
+                                    Text(text = statusSummary, fontSize = 12.5.sp, lineHeight = 19.sp)
+
+                                    if (packDiagnosticMsg.isNotBlank()) {
+                                        Text(
+                                            text = packDiagnosticMsg,
+                                            fontSize = 11.5.sp,
+                                            color = if (packStatus.isAnyFullPackReady) BrandEmerald else BrandCrimson,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
 
                                     if (isDownloadingPack) {
                                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -682,39 +699,44 @@ fun AiAssistantScreen(
                                                 onClick = {
                                                     scope.launch {
                                                         isDownloadingPack = true
-                                                        val res = app.translationManager.downloadArabicEnglishModels(wifiOnly = false) { msg ->
+                                                        packDiagnosticMsg = ""
+                                                        val rep = app.translationManager.downloadCompleteOfflinePacks(wifiOnly = false) { msg ->
                                                             packDownloadMsg = msg
                                                         }
+                                                        packStatus = app.translationManager.getOfflinePackStatus()
                                                         isDownloadingPack = false
-                                                        if (res.isSuccess) {
-                                                            neuralPackReady = true
-                                                            Toast.makeText(
-                                                                context,
-                                                                if (s.isArabic) "تم تنزيل القاموس الكامل وحفظه أوفلاين بنجاح!" else "Complete AR+EN Offline Dictionary Pack Ready!",
-                                                                Toast.LENGTH_LONG
-                                                            ).show()
-                                                        } else {
-                                                            Toast.makeText(context, res.exceptionOrNull()?.message ?: "Download failed — check internet connection", Toast.LENGTH_LONG).show()
-                                                        }
+                                                        packDiagnosticMsg = listOf(rep.dictMessage, rep.neuralMessage)
+                                                            .filter { it.isNotBlank() }
+                                                            .joinToString("\n")
+                                                        Toast.makeText(
+                                                            context,
+                                                            if (rep.succeeded) {
+                                                                if (s.isArabic) "✓ تم تنزيل القاموس الكامل وحفظه أوفلاين!" else "✓ Offline AR↔EN Dictionary Ready!"
+                                                            } else {
+                                                                if (s.isArabic) "تأكد من الاتصال بالإنترنت وأعد المحاولة" else "Check internet connection & retry"
+                                                            },
+                                                            Toast.LENGTH_LONG
+                                                        ).show()
                                                     }
                                                 },
                                                 modifier = Modifier.weight(1f),
-                                                colors = ButtonDefaults.buttonColors(containerColor = if (neuralPackReady) BrandTeal else BrandBlue)
+                                                colors = ButtonDefaults.buttonColors(containerColor = if (packStatus.isAnyFullPackReady) BrandTeal else BrandBlue)
                                             ) {
                                                 Icon(Icons.Default.CloudDownload, null, modifier = Modifier.size(16.dp))
                                                 Spacer(Modifier.width(6.dp))
                                                 Text(
-                                                    if (neuralPackReady) (if (s.isArabic) "تحديث / التحقق من القاموس" else "Verify / Re-Sync Pack")
-                                                    else (if (s.isArabic) "تنزيل القاموس العربي والإنجليزي (~30MB)" else "Download AR+EN Pack (~30MB)"),
+                                                    if (packStatus.isAnyFullPackReady) (if (s.isArabic) "تحديث / تنزيل الباقي" else "Sync / Update Packs")
+                                                    else (if (s.isArabic) "تنزيل القاموس العربي والإنجليزي الآن" else "Download Full AR↔EN Dictionary Now"),
                                                     fontSize = 11.5.sp
                                                 )
                                             }
-                                            if (neuralPackReady) {
+                                            if (packStatus.isAnyFullPackReady) {
                                                 OutlinedButton(onClick = {
                                                     scope.launch {
                                                         app.translationManager.deleteOfflineModels()
-                                                        neuralPackReady = false
-                                                        Toast.makeText(context, "Removed downloaded neural packs", Toast.LENGTH_SHORT).show()
+                                                        packStatus = app.translationManager.getOfflinePackStatus()
+                                                        packDiagnosticMsg = ""
+                                                        Toast.makeText(context, "Removed downloaded offline packs", Toast.LENGTH_SHORT).show()
                                                     }
                                                 }) {
                                                     Icon(Icons.Default.Delete, null, tint = BrandCrimson, modifier = Modifier.size(16.dp))
@@ -770,9 +792,11 @@ fun AiAssistantScreen(
                                                     translateEngineLabel = when {
                                                         res.fromLocalCache -> if (s.isArabic) "✓ مسترجع فوراً من الذاكرة المحلية" else "✓ Instant recall from local cache"
                                                         res.usedNeuralOfflineModel -> if (s.isArabic) "✓ مترجم بالقاموس العصبي الكامل (أوفلاين) ومحفوظ محلياً" else "✓ Translated via Full Neural Offline Pack & Saved Locally"
-                                                        else -> if (s.isArabic) "مترجم بالقاموس المدمج — نزّل القاموس العصبي أعلاه لترجمة كاملة" else "Built-in Dictionary — Download Neural Pack above for full sentences"
+                                                        res.usedFullArabEyesDict -> if (s.isArabic) "✓ مترجم بقاموس ArabEyes (87,000+ كلمة أوفلاين) ومحفوظ محلياً" else "✓ Translated via ArabEyes 87k Offline Dictionary & Saved Locally"
+                                                        else -> if (s.isArabic) "مترجم بالقاموس المدمج — اضغط تنزيل القاموس الكامل أعلاه" else "Built-in Dictionary — Tap Download Full Dictionary above"
                                                     }
                                                     savedTranslations = app.translationManager.loadSavedTranslations()
+                                                    packStatus = app.translationManager.getOfflinePackStatus()
                                                     isTranslating = false
                                                 }
                                             },
@@ -784,22 +808,27 @@ fun AiAssistantScreen(
                                             OutlinedButton(onClick = {
                                                 scope.launch {
                                                     runCatching {
+                                                        val tmpTxt = withContext(Dispatchers.IO) {
+                                                            File(context.cacheDir, "translated_${System.currentTimeMillis()}.txt").apply {
+                                                                writeText(
+                                                                    "Translated — ${file.nameWithoutExtension}\n\n$translatedPreview",
+                                                                    Charsets.UTF_8
+                                                                )
+                                                            }
+                                                        }
                                                         val out = FileHelper.uniqueFile(
                                                             FileHelper.pdfsDir(context),
                                                             "${file.nameWithoutExtension}_Translated.pdf"
                                                         )
-                                                        app.pdfEngine.createNewPdf(
-                                                            outputFile = out,
-                                                            title = "Translated — ${file.nameWithoutExtension}",
-                                                            bodyText = translatedPreview,
-                                                            pageCount = 1,
-                                                            template = PageTemplate.BLANK
-                                                        )
+                                                        app.converterEngine.textOrHtmlToPdf(tmpTxt, out)
+                                                        tmpTxt.delete()
                                                         val info = app.pdfEngine.inspectDocument(out)
                                                         app.repository.upsertDocument(
                                                             PdfDocumentItem(name = out.name, path = out.absolutePath, sizeBytes = info.sizeBytes, pageCount = info.pageCount)
                                                         )
                                                         onOpenPdfAtPage(out.absolutePath, 0)
+                                                    }.onFailure { err ->
+                                                        Toast.makeText(context, err.message ?: "Export failed", Toast.LENGTH_LONG).show()
                                                     }
                                                 }
                                             }) { Text("PDF") }

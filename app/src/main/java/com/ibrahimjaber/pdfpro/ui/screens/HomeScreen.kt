@@ -90,7 +90,9 @@ import com.ibrahimjaber.pdfpro.engine.PdfPrintHelper
 import com.ibrahimjaber.pdfpro.ui.theme.BrandBlue
 import com.ibrahimjaber.pdfpro.ui.theme.BrandCrimson
 import com.ibrahimjaber.pdfpro.ui.theme.BrandNavy
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 @Composable
@@ -120,7 +122,7 @@ fun HomeScreen(
     ) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
-                val imported = FileHelper.importPdfFromUri(context, uri)
+                val imported = withContext(Dispatchers.IO) { FileHelper.importPdfFromUri(context, uri) }
                 if (imported != null) {
                     val info = app.pdfEngine.inspectDocument(imported)
                     val item = PdfDocumentItem(

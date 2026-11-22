@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.RectF
+import androidx.exifinterface.media.ExifInterface
 import com.ibrahimjaber.pdfpro.data.AppBranding
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
@@ -40,6 +41,7 @@ data class ScannedPageItem(
 
 /**
  * 100% Offline CamScanner Pro Image Enhancement & Document Export Engine.
+ * - Automatic EXIF orientation normalization (fixes sideways camera captures)
  * - Automatic document border detection & background trimming
  * - 5 Pro Document Filters (Magic Color, Crisp B&W Adaptive Threshold, Shadow Removal, Grayscale, Original)
  * - Multi-page A4 PDF assembly with optional embedded Offline Arabic + English OCR searchable text layer
@@ -49,7 +51,8 @@ data class ScannedPageItem(
 object CamScannerEngine {
 
     /**
-     * Loads a memory-safe bitmap scaled down to maxDimension pixels on the longest edge.
+     * Loads a memory-safe bitmap scaled down to maxDimension pixels on the longest edge
+     * and automatically normalizes EXIF camera orientation so pages are always upright.
      */
     fun decodeScaledBitmap(filePath: String, maxDimension: Int = 1800): Bitmap? {
         val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -65,7 +68,22 @@ object CamScannerEngine {
             inSampleSize = sample
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        return BitmapFactory.decodeFile(filePath, decodeOpts)
+        val raw = BitmapFactory.decodeFile(filePath, decodeOpts) ?: return null
+
+        val exifRot = runCatching {
+            when (ExifInterface(filePath).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                else -> 0f
+            }
+        }.getOrDefault(0f)
+
+        if (exifRot == 0f) return raw
+        val matrix = Matrix().apply { postRotate(exifRot) }
+        return Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true).also {
+            if (it !== raw) raw.recycle()
+        }
     }
 
     /**

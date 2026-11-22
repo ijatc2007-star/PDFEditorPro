@@ -52,6 +52,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -103,7 +105,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ibrahimjaber.pdfpro.PdfProApp
 import com.ibrahimjaber.pdfpro.data.LocalStrings
@@ -113,6 +114,7 @@ import com.ibrahimjaber.pdfpro.engine.CamScannerEngine
 import com.ibrahimjaber.pdfpro.engine.ConverterCodec
 import com.ibrahimjaber.pdfpro.engine.FileHelper
 import com.ibrahimjaber.pdfpro.engine.OcrLanguageMode
+import com.ibrahimjaber.pdfpro.engine.OfflinePackStatus
 import com.ibrahimjaber.pdfpro.engine.ScanFilter
 import com.ibrahimjaber.pdfpro.engine.ScannedPageItem
 import com.ibrahimjaber.pdfpro.engine.TranslationDirection
@@ -133,7 +135,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 // =============================================================================
-// SCREEN 1: CAMSCANNER PRO (MULTI-PAGE DOCUMENT SCANNER + OCR + TRANSLATE)
+// SCREEN 1: CAMSCANNER PRO (BUILT-IN CAMERAX LIVE DOCUMENT SCANNER + OCR + TRANSLATE)
 // =============================================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -144,6 +146,7 @@ fun CamScannerScreen(
     onOpenPdf: (String) -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val s = LocalStrings.current
 
@@ -154,13 +157,23 @@ fun CamScannerScreen(
     var makeSearchableOcr by remember { mutableStateOf(true) }
     var ocrLang by remember { mutableStateOf(OcrLanguageMode.ARABIC_AND_ENGLISH) }
 
+    var showInAppCamera by remember { mutableStateOf(false) }
+    var flashOn by remember { mutableStateOf(false) }
+    var isCapturingPhoto by remember { mutableStateOf(false) }
+    var cameraErrorMsg by remember { mutableStateOf<String?>(null) }
+    var scanCameraRef by remember { mutableStateOf<Camera?>(null) }
+    var scanImageCaptureRef by remember { mutableStateOf<ImageCapture?>(null) }
+    val scanCameraExecutor = remember { Executors.newSingleThreadExecutor() }
+
     var isProcessing by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("") }
     var progressRatio by remember { mutableStateOf(0f) }
     var translatedScanResult by remember { mutableStateOf("") }
     var previewBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
-    var pendingCameraFile by remember { mutableStateOf<File?>(null) }
+    DisposableEffect(Unit) {
+        onDispose { scanCameraExecutor.shutdown() }
+    }
 
     fun refreshPreview(item: ScannedPageItem?) {
         scope.launch {
@@ -194,6 +207,11 @@ fun CamScannerScreen(
                 scannedPages.add(newItem)
                 selectedIndex = scannedPages.lastIndex
                 refreshPreview(newItem)
+                Toast.makeText(
+                    context,
+                    if (s.isArabic) "تم التقاط الصفحة #${scannedPages.size} بنجاح" else "Captured Page #${scannedPages.size}",
+                    Toast.LENGTH_SHORT
+                ).show()
             }.onFailure { err ->
                 Toast.makeText(context, err.message ?: "Scan processing failed", Toast.LENGTH_LONG).show()
             }
@@ -233,27 +251,19 @@ fun CamScannerScreen(
         }
     }
 
-    val takePictureLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        val file = pendingCameraFile
-        if (success && file != null && file.exists() && file.length() > 0L) {
-            ingestRawImageFile(file)
-        }
-    }
-
-    fun launchSystemCamera() {
-        val rawFile = File(context.cacheDir, "camscan_raw_${System.currentTimeMillis()}.jpg")
-        pendingCameraFile = rawFile
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", rawFile)
-        takePictureLauncher.launch(uri)
-    }
-
     val cameraPermLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) launchSystemCamera()
-        else Toast.makeText(context, if (s.isArabic) "يرجى السماح بإذن الكاميرا أو اختيار صور من المعرض" else "Camera permission denied — you can still pick photos from Gallery.", Toast.LENGTH_LONG).show()
+        if (granted) {
+            cameraErrorMsg = null
+            showInAppCamera = true
+        } else {
+            Toast.makeText(
+                context,
+                if (s.isArabic) "يرجى السماح بإذن الكاميرا من إعدادات الجهاز أو اختيار صور من المعرض" else "Camera permission denied — allow Camera in Settings or pick photos from Gallery.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     val galleryMultiLauncher = rememberLauncherForActivityResult(
@@ -264,7 +274,7 @@ fun CamScannerScreen(
                 isProcessing = true
                 for ((i, uri) in uris.withIndex()) {
                     statusText = if (s.isArabic) "تحسين الصفحة ${i + 1} / ${uris.size}..." else "Enhancing page ${i + 1} / ${uris.size}..."
-                    val copied = FileHelper.copyAnyFileFromUriToCache(context, uri) ?: continue
+                    val copied = withContext(Dispatchers.IO) { FileHelper.copyAnyFileFromUriToCache(context, uri) } ?: continue
                     runCatching {
                         val outEnhanced = File(context.cacheDir, "camscan_enh_${System.currentTimeMillis()}_$i.jpg")
                         CamScannerEngine.processScanPage(
@@ -305,6 +315,180 @@ fun CamScannerScreen(
         }
     }
 
+    // FULL-SCREEN BUILT-IN CAMERAX DOCUMENT SCANNER MODE (works reliably on 100% of Android devices!)
+    if (showInAppCamera) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    val pv = PreviewView(ctx).apply {
+                        scaleType = PreviewView.ScaleType.FILL_CENTER
+                    }
+                    val providerFuture = ProcessCameraProvider.getInstance(ctx)
+                    providerFuture.addListener({
+                        runCatching {
+                            val provider = providerFuture.get()
+                            val preview = Preview.Builder().build().also {
+                                it.surfaceProvider = pv.surfaceProvider
+                            }
+                            val capture = ImageCapture.Builder()
+                                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                                .build()
+                            scanImageCaptureRef = capture
+                            provider.unbindAll()
+                            val selector = if (provider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)) {
+                                CameraSelector.DEFAULT_BACK_CAMERA
+                            } else {
+                                CameraSelector.DEFAULT_FRONT_CAMERA
+                            }
+                            scanCameraRef = provider.bindToLifecycle(lifecycleOwner, selector, preview, capture)
+                            cameraErrorMsg = null
+                        }.onFailure { err ->
+                            cameraErrorMsg = err.localizedMessage ?: "Unable to start camera"
+                        }
+                    }, ContextCompat.getMainExecutor(ctx))
+                    pv
+                }
+            )
+
+            // Green Document Alignment Frame Overlay
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth(0.88f)
+                    .height(440.dp)
+                    .border(2.5.dp, Color(0xFF22C55E), RoundedCornerShape(14.dp))
+            ) {
+                Text(
+                    text = if (s.isArabic) "ضع المستند داخل الإطار الأخضر ثم اضغط زر التصوير" else "Align document inside frame & tap Capture",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 10.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+
+            // Top Camera HUD (Close, Page Counter, Flash)
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 12.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { showInAppCamera = false }) {
+                    Icon(Icons.Default.Close, contentDescription = "Close Camera", tint = Color.White)
+                }
+                Text(
+                    text = if (s.isArabic) "CamScanner • الصفحات: ${scannedPages.size}" else "CamScanner • Pages: ${scannedPages.size}",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+                IconButton(onClick = {
+                    flashOn = !flashOn
+                    scanCameraRef?.cameraControl?.enableTorch(flashOn)
+                }) {
+                    Icon(
+                        if (flashOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                        contentDescription = "Flash",
+                        tint = if (flashOn) Color(0xFFFDE047) else Color.White
+                    )
+                }
+            }
+
+            cameraErrorMsg?.let { err ->
+                Surface(
+                    color = BrandCrimson,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp)
+                ) {
+                    Text(err, color = Color.White, modifier = Modifier.padding(14.dp), fontSize = 13.sp)
+                }
+            }
+
+            // Bottom Shutter & Done Bar
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.72f))
+                    .padding(horizontal = 20.dp, vertical = 22.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(onClick = {
+                    showInAppCamera = false
+                    galleryMultiLauncher.launch(arrayOf("image/*"))
+                }) {
+                    Icon(Icons.Default.PhotoLibrary, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (s.isArabic) "المعرض" else "Gallery", color = Color.White, fontSize = 12.sp)
+                }
+
+                // Big Green Capture Shutter Button
+                Button(
+                    enabled = !isCapturingPhoto,
+                    onClick = {
+                        val cap = scanImageCaptureRef
+                        if (cap == null) {
+                            Toast.makeText(context, "Camera initializing — please wait 1 second", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        isCapturingPhoto = true
+                        val outFile = File(context.cacheDir, "camscan_raw_${System.currentTimeMillis()}.jpg")
+                        val opts = ImageCapture.OutputFileOptions.Builder(outFile).build()
+                        cap.takePicture(opts, scanCameraExecutor, object : ImageCapture.OnImageSavedCallback {
+                            override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                                scope.launch(Dispatchers.Main) {
+                                    isCapturingPhoto = false
+                                    if (outFile.exists() && outFile.length() > 0L) {
+                                        ingestRawImageFile(outFile)
+                                    } else {
+                                        Toast.makeText(context, "Captured image was empty — please retry", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+
+                            override fun onError(exception: ImageCaptureException) {
+                                scope.launch(Dispatchers.Main) {
+                                    isCapturingPhoto = false
+                                    Toast.makeText(context, "Capture failed: ${exception.message}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        })
+                    },
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandEmerald),
+                    modifier = Modifier.size(72.dp),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    if (isCapturingPhoto) {
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
+                    } else {
+                        Icon(Icons.Default.CameraAlt, contentDescription = "Capture", tint = Color.White, modifier = Modifier.size(32.dp))
+                    }
+                }
+
+                Button(
+                    enabled = scannedPages.isNotEmpty(),
+                    onClick = { showInAppCamera = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandBlue)
+                ) {
+                    Icon(Icons.Default.Check, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (s.isArabic) "تم (${scannedPages.size})" else "Done (${scannedPages.size})", fontSize = 12.sp)
+                }
+            }
+        }
+        return
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -334,13 +518,13 @@ fun CamScannerScreen(
                 ) {
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            text = if (s.isArabic) "التصوير والمسح الضوئي متعدد الصفحات (أوفلاين)" else "Multi-Page Document Scanner (100% Offline)",
+                            text = if (s.isArabic) "التصوير والمسح الضوئي متعدد الصفحات (كاميرا مدمجة)" else "Built-In Multi-Page Document Scanner (Offline)",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.5.sp
                         )
                         Text(
-                            text = if (s.isArabic) "قص تلقائي للحواف • فلتر سحري ملون • إزالة الظلال • تحويل إلى PDF قابل للبحث (عربي/إنجليزي)" else "Auto-Border Crop • Magic Color • Shadow Removal • Crisp B&W • Searchable AR+EN OCR PDF",
+                            text = if (s.isArabic) "كاميرا مدمجة سريعة • قص تلقائي • فلتر سحري ملون • إزالة الظلال • PDF قابل للبحث OCR" else "In-App CameraX Scanner • Auto-Border Crop • Magic Color • Shadow Removal • Searchable OCR PDF",
                             color = Color(0xFFBAE6FD),
                             fontSize = 12.sp
                         )
@@ -348,8 +532,12 @@ fun CamScannerScreen(
                             Button(
                                 onClick = {
                                     val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-                                    if (hasPerm) launchSystemCamera()
-                                    else cameraPermLauncher.launch(Manifest.permission.CAMERA)
+                                    if (hasPerm) {
+                                        cameraErrorMsg = null
+                                        showInAppCamera = true
+                                    } else {
+                                        cameraPermLauncher.launch(Manifest.permission.CAMERA)
+                                    }
                                 },
                                 modifier = Modifier.weight(1f),
                                 colors = ButtonDefaults.buttonColors(containerColor = BrandEmerald)
@@ -466,7 +654,6 @@ fun CamScannerScreen(
                                 )
                             }
 
-                            // Multi-page selector strip
                             if (scannedPages.size > 1) {
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     itemsIndexed(scannedPages) { idx, _ ->
@@ -630,7 +817,7 @@ fun CamScannerScreen(
 }
 
 // =============================================================================
-// SCREEN 2: LIVE INSTANT CAMERA TRANSLATOR (OFFLINE OCR + DOWNLOADED AR<->EN)
+// SCREEN 2: LIVE INSTANT CAMERA TRANSLATOR (OFFLINE OCR + DUAL-ENGINE AR<->EN)
 // =============================================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -650,9 +837,10 @@ fun LiveCameraTranslateScreen(
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         )
     }
-    var modelsDownloaded by remember { mutableStateOf(false) }
+    var packStatus by remember { mutableStateOf(OfflinePackStatus(false, 0, 0)) }
     var isDownloadingModels by remember { mutableStateOf(false) }
     var downloadStatus by remember { mutableStateOf("") }
+    var cameraError by remember { mutableStateOf<String?>(null) }
 
     var direction by remember { mutableStateOf(TranslationDirection.AUTO) }
     var liveAutoMode by remember { mutableStateOf(true) }
@@ -670,14 +858,11 @@ fun LiveCameraTranslateScreen(
     val lastAnalyzeTimeMs = remember { AtomicLong(0L) }
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
 
-    // Offline TTS for reading camera translations aloud
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
     DisposableEffect(Unit) {
         var engine: TextToSpeech? = null
         engine = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts = engine
-            }
+            if (status == TextToSpeech.SUCCESS) tts = engine
         }
         onDispose {
             runCatching { engine?.stop(); engine?.shutdown() }
@@ -686,7 +871,7 @@ fun LiveCameraTranslateScreen(
     }
 
     LaunchedEffect(Unit) {
-        modelsDownloaded = app.translationManager.areOfflineModelsReady()
+        packStatus = app.translationManager.getOfflinePackStatus()
     }
 
     val permLauncher = rememberLauncherForActivityResult(
@@ -721,8 +906,11 @@ fun LiveCameraTranslateScreen(
                     engineBadge = when {
                         tr.fromLocalCache -> if (s.isArabic) "✓ من الذاكرة المحلية (فوري)" else "✓ Local Cache (Instant)"
                         tr.usedNeuralOfflineModel -> if (s.isArabic) "✓ القاموس العصبي الكامل (أوفلاين)" else "✓ Neural AR+EN Pack (Offline)"
-                        else -> if (s.isArabic) "قاموس مدمج — نزّل القاموس الكامل لدقة 100%" else "Built-in Dict — Download full AR+EN pack"
+                        tr.usedFullArabEyesDict -> if (s.isArabic) "✓ قاموس ArabEyes (87,000 كلمة أوفلاين)" else "✓ ArabEyes 87k Dictionary (Offline)"
+                        else -> if (s.isArabic) "قاموس مدمج — نزّل القاموس الكامل أعلاه" else "Built-in Dict — Download full AR+EN pack above"
                     }
+                } else if (saveHistory) {
+                    Toast.makeText(context, if (s.isArabic) "لم يتم اكتشاف نص واضح — قرّب الكاميرا وأعد المحاولة" else "No clear text found — move closer & retry", Toast.LENGTH_SHORT).show()
                 }
             }.onFailure { err ->
                 Toast.makeText(context, err.message ?: "Camera OCR error", Toast.LENGTH_SHORT).show()
@@ -738,7 +926,7 @@ fun LiveCameraTranslateScreen(
     ) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
-                val f = FileHelper.copyAnyFileFromUriToCache(context, uri)
+                val f = withContext(Dispatchers.IO) { FileHelper.copyAnyFileFromUriToCache(context, uri) }
                 if (f != null) {
                     val bmp = withContext(Dispatchers.IO) { CamScannerEngine.decodeScaledBitmap(f.absolutePath, 1500) }
                     if (bmp != null) {
@@ -780,7 +968,7 @@ fun LiveCameraTranslateScreen(
                 .padding(padding)
                 .background(Color.Black)
         ) {
-            // Top Status Strip: Offline Neural Pack Download Status + Direction Selector
+            // Top Status Strip: Dual-Engine Offline Pack Download Status + Direction Selector
             Surface(color = BrandNavy, modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
@@ -788,41 +976,50 @@ fun LiveCameraTranslateScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (modelsDownloaded) {
+                        if (packStatus.isAnyFullPackReady && !isDownloadingModels) {
+                            val badgeTxt = buildString {
+                                append("✓ ")
+                                if (packStatus.neuralModelReady) append(if (s.isArabic) "عصبي + " else "Neural + ")
+                                if (packStatus.arabEyesWordCount >= 1000) append("${packStatus.arabEyesWordCount} ${if (s.isArabic) "كلمة أوفلاين" else "words offline"}")
+                                else append(if (s.isArabic) "جاهز أوفلاين" else "Offline Ready")
+                            }
                             Text(
-                                text = if (s.isArabic) "✓ القاموس العصبي (عربي + إنجليزي) جاهز أوفلاين" else "✓ Offline AR+EN Neural Pack Ready",
+                                text = badgeTxt,
                                 color = Color(0xFF86EFAC),
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
+                                fontSize = 11.5.sp,
+                                modifier = Modifier.weight(1f)
                             )
                         } else if (isDownloadingModels) {
                             Text(
                                 text = downloadStatus.ifBlank { if (s.isArabic) "جاري تنزيل القاموس..." else "Downloading AR+EN Pack..." },
                                 color = Color(0xFFFDE047),
-                                fontSize = 12.sp
+                                fontSize = 11.5.sp,
+                                modifier = Modifier.weight(1f)
                             )
                         } else {
                             OutlinedButton(
                                 onClick = {
                                     scope.launch {
                                         isDownloadingModels = true
-                                        val res = app.translationManager.downloadArabicEnglishModels(wifiOnly = false) { msg ->
+                                        val rep = app.translationManager.downloadCompleteOfflinePacks(wifiOnly = false) { msg ->
                                             downloadStatus = msg
                                         }
+                                        packStatus = app.translationManager.getOfflinePackStatus()
                                         isDownloadingModels = false
-                                        if (res.isSuccess) {
-                                            modelsDownloaded = true
-                                            Toast.makeText(context, if (s.isArabic) "تم تنزيل القاموس العربي والإنجليزي بنجاح!" else "Offline AR+EN Neural Pack downloaded!", Toast.LENGTH_LONG).show()
-                                        } else {
-                                            Toast.makeText(context, res.exceptionOrNull()?.message ?: "Download requires internet once", Toast.LENGTH_LONG).show()
-                                        }
+                                        Toast.makeText(
+                                            context,
+                                            if (rep.succeeded) (if (s.isArabic) "✓ تم تنزيل القاموس وحفظه أوفلاين بنجاح!" else "✓ Offline AR↔EN Dictionary Ready!")
+                                            else "${rep.dictMessage} | ${rep.neuralMessage}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
                                     }
                                 },
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                             ) {
                                 Icon(Icons.Default.CloudDownload, null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text(if (s.isArabic) "تنزيل القاموس الكامل (~30MB)" else "Download Full AR+EN Pack (~30MB)", color = Color.White, fontSize = 11.5.sp)
+                                Text(if (s.isArabic) "تنزيل القاموس الكامل" else "Download Offline Dict", color = Color.White, fontSize = 11.5.sp)
                             }
                         }
 
@@ -854,11 +1051,18 @@ fun LiveCameraTranslateScreen(
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { ctx ->
-                            val previewView = PreviewView(ctx)
+                            val previewView = PreviewView(ctx).apply {
+                                scaleType = PreviewView.ScaleType.FILL_CENTER
+                            }
                             val providerFuture = ProcessCameraProvider.getInstance(ctx)
                             providerFuture.addListener({
                                 runCatching {
                                     val provider = providerFuture.get()
+                                    val selector = if (provider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)) {
+                                        CameraSelector.DEFAULT_BACK_CAMERA
+                                    } else {
+                                        CameraSelector.DEFAULT_FRONT_CAMERA
+                                    }
                                     val preview = Preview.Builder().build().also {
                                         it.surfaceProvider = previewView.surfaceProvider
                                     }
@@ -889,18 +1093,32 @@ fun LiveCameraTranslateScreen(
                                     }
 
                                     provider.unbindAll()
-                                    boundCamera = provider.bindToLifecycle(
-                                        lifecycleOwner,
-                                        CameraSelector.DEFAULT_BACK_CAMERA,
-                                        preview,
-                                        capture,
-                                        analysis
-                                    )
+                                    // Try 3-surface binding first; automatically fall back to 2-surface on LEGACY cameras
+                                    boundCamera = try {
+                                        provider.bindToLifecycle(lifecycleOwner, selector, preview, capture, analysis)
+                                    } catch (_: Exception) {
+                                        provider.unbindAll()
+                                        liveAutoMode = false
+                                        provider.bindToLifecycle(lifecycleOwner, selector, preview, capture)
+                                    }
+                                    cameraError = null
+                                }.onFailure { err ->
+                                    cameraError = err.localizedMessage ?: "Camera unavailable"
                                 }
                             }, ContextCompat.getMainExecutor(ctx))
                             previewView
                         }
                     )
+
+                    cameraError?.let { err ->
+                        Surface(
+                            color = BrandCrimson,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.align(Alignment.TopCenter).padding(12.dp)
+                        ) {
+                            Text(err, color = Color.White, modifier = Modifier.padding(10.dp), fontSize = 12.sp)
+                        }
+                    }
 
                     // Center Focus Frame Overlay
                     Box(
@@ -929,8 +1147,14 @@ fun LiveCameraTranslateScreen(
                             .padding(bottom = 14.dp)
                     ) {
                         Button(
+                            enabled = !isScanningNow,
                             onClick = {
-                                val cap = imageCaptureRef ?: return@Button
+                                val cap = imageCaptureRef
+                                if (cap == null) {
+                                    Toast.makeText(context, "Camera initializing — please retry", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                isScanningNow = true
                                 val outFile = File(context.cacheDir, "cam_tr_${System.currentTimeMillis()}.jpg")
                                 val opts = ImageCapture.OutputFileOptions.Builder(outFile).build()
                                 cap.takePicture(opts, cameraExecutor, object : ImageCapture.OnImageSavedCallback {
@@ -938,11 +1162,20 @@ fun LiveCameraTranslateScreen(
                                         val bmp = CamScannerEngine.decodeScaledBitmap(outFile.absolutePath, 1500)
                                         if (bmp != null) {
                                             runOcrAndTranslateBitmap(bmp, saveHistory = true, sourceTag = "Camera Snap")
+                                        } else {
+                                            scope.launch(Dispatchers.Main) {
+                                                isScanningNow = false
+                                                Toast.makeText(context, "Failed to decode captured photo", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
                                     }
 
                                     override fun onError(exception: ImageCaptureException) {
-                                        analyzerBusy.set(false)
+                                        scope.launch(Dispatchers.Main) {
+                                            isScanningNow = false
+                                            analyzerBusy.set(false)
+                                            Toast.makeText(context, "Capture failed: ${exception.message}", Toast.LENGTH_LONG).show()
+                                        }
                                     }
                                 })
                             },
@@ -1091,10 +1324,6 @@ fun LiveCameraTranslateScreen(
     }
 }
 
-/**
- * Converts a CameraX YUV_420_888 ImageProxy to a rotated Bitmap cropped to the center focus region
- * for fast, accurate real-time offline Tesseract OCR.
- */
 private fun imageProxyToCroppedCenterBitmap(proxy: ImageProxy): Bitmap? {
     return runCatching {
         val yBuffer = proxy.planes[0].buffer
@@ -1120,7 +1349,6 @@ private fun imageProxyToCroppedCenterBitmap(proxy: ImageProxy): Bitmap? {
             Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, m, true).also { raw.recycle() }
         } else raw
 
-        // Crop center 86% width x 42% height matching the focus target box
         val cx = (oriented.width * 0.07f).toInt().coerceAtLeast(0)
         val cy = (oriented.height * 0.29f).toInt().coerceAtLeast(0)
         val cw = (oriented.width * 0.86f).toInt().coerceAtMost(oriented.width - cx)

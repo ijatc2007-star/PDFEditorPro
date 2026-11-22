@@ -5,7 +5,7 @@ import java.util.UUID
 object AppBranding {
     const val APP_NAME = "PDF Editor Pro"
     const val APP_NAME_AR = "PDF إيديتور برو"
-    const val APP_VERSION = "5.0.0"
+    const val APP_VERSION = "5.1.0"
     const val DEVELOPER_NAME = "Ibrahim Jaber"
     const val DEVELOPER_NAME_AR = "إبراهيم جابر"
     const val COPYRIGHT_YEAR = "2026"

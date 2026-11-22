@@ -81,7 +81,9 @@ import com.ibrahimjaber.pdfpro.engine.PdfFormFieldItem
 import com.ibrahimjaber.pdfpro.ui.theme.BrandBlue
 import com.ibrahimjaber.pdfpro.ui.theme.BrandCrimson
 import com.ibrahimjaber.pdfpro.ui.theme.BrandEmerald
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -114,7 +116,7 @@ fun OcrStudioScreen(
     val pickPdf = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
-                val imported = FileHelper.importPdfFromUri(context, uri)
+                val imported = withContext(Dispatchers.IO) { FileHelper.importPdfFromUri(context, uri) }
                 if (imported != null) {
                     val info = app.pdfEngine.inspectDocument(imported)
                     app.repository.upsertDocument(
@@ -329,7 +331,7 @@ fun FormFillerScreen(
     val pickPdf = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
-                val imported = FileHelper.importPdfFromUri(context, uri)
+                val imported = withContext(Dispatchers.IO) { FileHelper.importPdfFromUri(context, uri) }
                 if (imported != null) {
                     val info = app.pdfEngine.inspectDocument(imported)
                     app.repository.upsertDocument(
@@ -543,7 +545,7 @@ fun DigitalSignatureScreen(
     val pickPdf = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
-                val imported = FileHelper.importPdfFromUri(context, uri)
+                val imported = withContext(Dispatchers.IO) { FileHelper.importPdfFromUri(context, uri) }
                 if (imported != null) {
                     val info = app.pdfEngine.inspectDocument(imported)
                     app.repository.upsertDocument(
