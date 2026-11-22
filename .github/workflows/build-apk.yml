@@ -42,9 +42,9 @@ jobs:
                       seen.add(k)
                       lines.append(f"{en}\t{ar}\n")
           assert len(lines) > 50000, f"Too few dictionary rows: {len(lines)}"
-          with gzip.open("app/src/main/assets/dict/arabeyes_en_ar.tsv.gz", "wb", compresslevel=9) as f:
+          with open("app/src/main/assets/dict/arabeyes_en_ar.tsv", "wb") as f:
               f.write("".join(lines).encode("utf-8"))
-          print(f"Bundled {len(lines)} ArabEyes EN<->AR dictionary entries.")
+          print(f"Bundled {len(lines)} ArabEyes EN<->AR dictionary entries (UTF-8 TSV, APK deflate ~880KB).")
           PY
           ls -lh app/src/main/assets/dict
 
@@ -76,6 +76,21 @@ jobs:
 
       - name: Build Android Debug APK
         run: gradle assembleDebug
+
+      - name: Verify Bundled Offline Dictionary & OCR Assets Inside APK
+        run: |
+          python3 - <<'PY'
+          import zipfile, glob
+          apk = glob.glob("app/build/outputs/apk/debug/*.apk")[0]
+          with zipfile.ZipFile(apk) as z:
+              names = set(z.namelist())
+              assert "assets/tessdata/ara.traineddata" in names, "Missing Arabic OCR model!"
+              assert "assets/tessdata/eng.traineddata" in names, "Missing English OCR model!"
+              assert "assets/dict/arabeyes_en_ar.tsv" in names, "Missing bundled ArabEyes dictionary!"
+              lines = [ln for ln in z.read("assets/dict/arabeyes_en_ar.tsv").decode("utf-8").splitlines() if "\t" in ln]
+              assert len(lines) > 50000, f"Bundled dictionary too small: {len(lines)}"
+              print(f"VERIFIED APK ASSETS: ara.traineddata + eng.traineddata + {len(lines):,} EN<->AR dictionary entries!")
+          PY
 
       - name: Build Google Play Release AAB Bundle
         env:

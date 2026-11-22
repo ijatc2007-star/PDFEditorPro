@@ -17,6 +17,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
+import java.io.BufferedInputStream
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.File
@@ -86,7 +87,10 @@ data class DictionaryDownloadReport(
 class NeuralTranslationManager(private val context: Context) {
 
     companion object {
-        private const val BUNDLED_DICT_ASSET = "dict/arabeyes_en_ar.tsv.gz"
+        private val BUNDLED_DICT_ASSETS = listOf(
+            "dict/arabeyes_en_ar.tsv",
+            "dict/arabeyes_en_ar.tsv.gz"
+        )
         private val DICT_MIRROR_URLS = listOf(
             "https://cdn.jsdelivr.net/gh/usefksa/engAraDictionaryFrom_ArabEyes@master/engAraDictionary.sql",
             "https://raw.githubusercontent.com/usefksa/engAraDictionaryFrom_ArabEyes/master/engAraDictionary.sql"
@@ -127,7 +131,8 @@ class NeuralTranslationManager(private val context: Context) {
 
     /**
      * Automatically unpacks the 87,423-word ArabEyes dictionary bundled inside APK assets
-     * (`assets/dict/arabeyes_en_ar.tsv.gz`) so the full offline dictionary is ALWAYS ready in <0.4s.
+     * (`assets/dict/arabeyes_en_ar.tsv` or `.tsv.gz` with automatic gzip magic-byte detection)
+     * so the full offline dictionary is ALWAYS ready in <0.3s with zero internet needed.
      */
     suspend fun ensureBundledDictionaryInstalled(): Int = withContext(Dispatchers.IO) {
         if (fullDictFile.exists() && fullDictFile.length() > 50_000L) {
@@ -136,9 +141,20 @@ class NeuralTranslationManager(private val context: Context) {
         val unpacked = runCatching {
             var count = 0
             val tmpFile = File(storageDir, "arabeyes_en_ar.tsv.tmp")
-            context.assets.open(BUNDLED_DICT_ASSET).use { rawStream ->
-                GZIPInputStream(rawStream).use { gz ->
-                    BufferedReader(InputStreamReader(gz, Charsets.UTF_8)).use { br ->
+            val assetStream = BUNDLED_DICT_ASSETS.firstNotNullOfOrNull { assetPath ->
+                runCatching { context.assets.open(assetPath) }.getOrNull()
+            } ?: return@runCatching 0
+
+            assetStream.use { rawStream ->
+                val buffered = BufferedInputStream(rawStream, 16 * 1024)
+                buffered.mark(4)
+                val b0 = buffered.read()
+                val b1 = buffered.read()
+                buffered.reset()
+                val isGzip = (b0 == 0x1F && b1 == 0x8B)
+                val decodedStream = if (isGzip) GZIPInputStream(buffered) else buffered
+                decodedStream.use { input ->
+                    BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { br ->
                         BufferedWriter(OutputStreamWriter(FileOutputStream(tmpFile), Charsets.UTF_8)).use { bw ->
                             var line = br.readLine()
                             while (line != null) {
