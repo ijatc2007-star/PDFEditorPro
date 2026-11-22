@@ -792,6 +792,7 @@ fun AiAssistantScreen(
                                                     translateEngineLabel = when {
                                                         res.fromLocalCache -> if (s.isArabic) "✓ مسترجع فوراً من الذاكرة المحلية" else "✓ Instant recall from local cache"
                                                         res.usedNeuralOfflineModel -> if (s.isArabic) "✓ مترجم بالقاموس العصبي الكامل (أوفلاين) ومحفوظ محلياً" else "✓ Translated via Full Neural Offline Pack & Saved Locally"
+                                                        res.usedOnlineSavedLocally -> if (s.isArabic) "✓ مترجم بدقة الجمل الكاملة ومحفوظ محلياً للعمل أوفلاين لاحقاً" else "✓ Full-Sentence Sync & Saved Locally for Offline Reuse"
                                                         res.usedFullArabEyesDict -> if (s.isArabic) "✓ مترجم بقاموس ArabEyes (87,000+ كلمة أوفلاين) ومحفوظ محلياً" else "✓ Translated via ArabEyes 87k Offline Dictionary & Saved Locally"
                                                         else -> if (s.isArabic) "مترجم بالقاموس المدمج — اضغط تنزيل القاموس الكامل أعلاه" else "Built-in Dictionary — Tap Download Full Dictionary above"
                                                     }

@@ -255,9 +255,43 @@ class LocalTranslationStore:
                 """
             )
             conn.commit()
-        # Seed core glossary if empty
-        if self.get_dictionary_count() == 0:
+        # Seed core glossary & auto-load bundled 87,423-word ArabEyes dictionary if present
+        if self.get_dictionary_count() < 1000:
             self._bulk_upsert_dict({**v4.EN_TO_AR_WORDS, **EXTENDED_EN_AR_GLOSSARY})
+            self._load_bundled_arabeyes_gz()
+
+    def _find_bundled_dict_gz(self) -> Optional[str]:
+        import sys
+        candidates = []
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            candidates.append(os.path.join(sys._MEIPASS, "dict", "arabeyes_en_ar.tsv.gz"))
+        here = os.path.dirname(os.path.abspath(__file__))
+        candidates.append(os.path.join(here, "dict", "arabeyes_en_ar.tsv.gz"))
+        for c in candidates:
+            if os.path.isfile(c) and os.path.getsize(c) > 10_000:
+                return c
+        return None
+
+    def _load_bundled_arabeyes_gz(self) -> int:
+        import gzip
+        gz_path = self._find_bundled_dict_gz()
+        if not gz_path:
+            return 0
+        parsed: Dict[str, str] = {}
+        try:
+            with gzip.open(gz_path, "rt", encoding="utf-8", errors="ignore") as f:
+                for ln in f:
+                    if "\t" in ln:
+                        en_w, ar_w = ln.rstrip("\r\n").split("\t", 1)
+                        en_k = en_w.strip().lower()
+                        ar_v = ar_w.split("::")[0].strip()
+                        if en_k and ar_v and en_k not in parsed:
+                            parsed[en_k] = ar_v
+            if parsed:
+                return self._bulk_upsert_dict(parsed)
+        except Exception:
+            return 0
+        return 0
 
     def _bulk_upsert_dict(self, pairs: Dict[str, str]) -> int:
         rows = []
@@ -290,39 +324,46 @@ class LocalTranslationStore:
         self, progress_cb: Optional[Callable[[str], None]] = None
     ) -> Dict:
         """
-        Downloads the verified open-source 87,423-word ArabEyes English <-> Arabic dictionary
-        over HTTPS and saves it permanently inside the local SQLite database for 100% offline use.
+        Loads the bundled 87,423-word ArabEyes dictionary (guaranteed offline!) and optionally
+        refreshes from jsDelivr / GitHub HTTPS mirrors into the local SQLite database.
         """
         added = self._bulk_upsert_dict({**v4.EN_TO_AR_WORDS, **EXTENDED_EN_AR_GLOSSARY})
+        bundled_added = self._load_bundled_arabeyes_gz()
         online_added = 0
-        source_used = "Built-in Extended Bilingual Lexicon"
+        source_used = f"Bundled ArabEyes Offline Pack ({bundled_added:,} words)" if bundled_added >= 1000 else "Built-in Extended Lexicon"
 
-        arabeyes_url = "https://raw.githubusercontent.com/usefksa/engAraDictionaryFrom_ArabEyes/master/engAraDictionary.sql"
-        if progress_cb:
-            progress_cb("Downloading 87,000-word ArabEyes English ↔ Arabic dictionary (HTTPS)...")
-        try:
-            req = urllib.request.Request(arabeyes_url, headers={"User-Agent": "PDFEditorPro/5.1"})
-            with urllib.request.urlopen(req, timeout=25) as resp:
-                raw = resp.read().decode("utf-8", errors="ignore")
-            matches = re.findall(r"\(\d+,\s*'([^']{1,60})',\s*'([^']{1,160})'\)", raw)
-            parsed: Dict[str, str] = {}
-            for en_w, ar_w in matches:
-                en_k = en_w.strip().lower()
-                ar_v = ar_w.split("::")[0].strip()
-                if en_k and ar_v and en_k not in parsed:
-                    parsed[en_k] = ar_v
-            if len(parsed) >= 1000:
+        if bundled_added < 1000:
+            mirrors = [
+                "https://cdn.jsdelivr.net/gh/usefksa/engAraDictionaryFrom_ArabEyes@master/engAraDictionary.sql",
+                "https://raw.githubusercontent.com/usefksa/engAraDictionaryFrom_ArabEyes/master/engAraDictionary.sql",
+            ]
+            for url in mirrors:
                 if progress_cb:
-                    progress_cb(f"Saving {len(parsed)} English ↔ Arabic words into local SQLite database...")
-                online_added = self._bulk_upsert_dict(parsed)
-                source_used = f"ArabEyes Complete EN↔AR Pack ({online_added:,} words)"
-        except Exception as exc:
-            source_used = f"Built-in Lexicon (HTTPS unavailable: {exc})"
+                    progress_cb("Downloading 87,423-word ArabEyes English ↔ Arabic dictionary (HTTPS)...")
+                try:
+                    req = urllib.request.Request(url, headers={"User-Agent": "PDFEditorPro/5.2"})
+                    with urllib.request.urlopen(req, timeout=25) as resp:
+                        raw = resp.read().decode("utf-8", errors="ignore")
+                    matches = re.findall(r"\(\d+,\s*'([^']{1,60})',\s*'([^']{1,160})'\)", raw)
+                    parsed: Dict[str, str] = {}
+                    for en_w, ar_w in matches:
+                        en_k = en_w.strip().lower()
+                        ar_v = ar_w.split("::")[0].strip()
+                        if en_k and ar_v and en_k not in parsed:
+                            parsed[en_k] = ar_v
+                    if len(parsed) >= 1000:
+                        if progress_cb:
+                            progress_cb(f"Saving {len(parsed):,} English ↔ Arabic words into SQLite...")
+                        online_added = self._bulk_upsert_dict(parsed)
+                        source_used = f"ArabEyes Complete EN↔AR Pack ({online_added:,} words)"
+                        break
+                except Exception as exc:
+                    source_used = f"Built-in Lexicon (HTTPS unavailable: {exc})"
 
         total = self.get_dictionary_count()
         if progress_cb:
             progress_cb(f"Local Offline Dictionary Ready: {total:,} English ↔ Arabic entries.")
-        return {"total_entries": total, "online_added": online_added, "seeded": added, "source": source_used}
+        return {"total_entries": total, "online_added": online_added or bundled_added, "seeded": added, "source": source_used}
 
     def _try_online_sentence_translate(self, text: str, direction: str) -> Optional[str]:
         """

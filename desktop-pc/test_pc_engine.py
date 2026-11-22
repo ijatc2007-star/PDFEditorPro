@@ -181,7 +181,10 @@ def test_v5_flagship_engines(tmp_path: Path):
     # 1. Local SQLite Dictionary + Persistent Translation Cache & Saved History
     db_file = str(tmp_path / "test_v5_trans.db")
     store = v5.LocalTranslationStore(db_path=db_file)
-    assert store.get_dictionary_count() >= 250
+    if store._find_bundled_dict_gz():
+        assert store.get_dictionary_count() >= 50000
+    else:
+        assert store.get_dictionary_count() >= 250
 
     res1 = store.translate_smart(
         "Executive Summary: All engineering documents must pass security verification.",

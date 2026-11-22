@@ -63,4 +63,13 @@ class V5EnginesTest {
         assertEquals("اتفاقية", parsed["agreement"])
         assertEquals("أمن", parsed["security"])
     }
+
+    @Test
+    fun camScannerCropRectClampsSafely() {
+        val clamped = com.ibrahimjaber.pdfpro.engine.CamScannerEngine.clampCropRect(-0.2f, 0.8f, 0.1f, 1.5f)
+        assertEquals(0f, clamped[0], 0.001f)
+        assertEquals(0.45f, clamped[1], 0.001f)
+        assertTrue(clamped[2] >= clamped[0] + 0.15f)
+        assertTrue(clamped[3] >= clamped[1] + 0.15f && clamped[3] <= 1f)
+    }
 }

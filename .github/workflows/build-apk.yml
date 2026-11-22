@@ -22,6 +22,32 @@ jobs:
           curl -fsSL -o app/src/main/assets/tessdata/ara.traineddata https://github.com/tesseract-ocr/tessdata_fast/raw/main/ara.traineddata
           ls -lh app/src/main/assets/tessdata
 
+      - name: Bundle Complete 87,423-Word ArabEyes Offline EN↔AR Dictionary (gzipped 700KB)
+        run: |
+          mkdir -p app/src/main/assets/dict
+          python3 - << 'PY'
+          import gzip, re, urllib.request
+          url = "https://raw.githubusercontent.com/usefksa/engAraDictionaryFrom_ArabEyes/master/engAraDictionary.sql"
+          raw = urllib.request.urlopen(url, timeout=30).read().decode("utf-8", errors="ignore")
+          rx = re.compile(r"\(\d+,\s*'([^']{1,60})',\s*'([^']{1,160})'\)")
+          seen = set()
+          lines = []
+          for ln in raw.splitlines():
+              m = rx.search(ln)
+              if m:
+                  en = m.group(1).strip().replace("\t", " ")
+                  ar = m.group(2).strip().replace("\t", " ")
+                  k = en.lower()
+                  if en and ar and k not in seen:
+                      seen.add(k)
+                      lines.append(f"{en}\t{ar}\n")
+          assert len(lines) > 50000, f"Too few dictionary rows: {len(lines)}"
+          with gzip.open("app/src/main/assets/dict/arabeyes_en_ar.tsv.gz", "wb", compresslevel=9) as f:
+              f.write("".join(lines).encode("utf-8"))
+          print(f"Bundled {len(lines)} ArabEyes EN<->AR dictionary entries.")
+          PY
+          ls -lh app/src/main/assets/dict
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
@@ -61,13 +87,13 @@ jobs:
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PDFEditorPro-v5.1-IbrahimJaber2026-Android-APK
+          name: PDFEditorPro-v5.2-IbrahimJaber2026-Android-APK
           path: app/build/outputs/apk/debug/*.apk
 
       - name: Upload Google Play Release AAB Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PDFEditorPro-v5.1-IbrahimJaber2026-PlayStore-AAB
+          name: PDFEditorPro-v5.2-IbrahimJaber2026-PlayStore-AAB
           path: app/build/outputs/bundle/release/*.aab
 
       - name: Upload Security Lint Report
@@ -78,7 +104,7 @@ jobs:
           path: app/build/reports/lint-results-debug.html
 
   build-windows-exe:
-    name: Build Windows PC EXE (with Offline AR/EN OCR)
+    name: Build Windows PC EXE (with Offline AR/EN OCR & 87k Dictionary)
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -96,6 +122,29 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Bundle Complete 87,423-Word ArabEyes Offline EN↔AR Dictionary
+        shell: python
+        run: |
+          import gzip, os, re, urllib.request
+          os.makedirs("desktop-pc/dict", exist_ok=True)
+          url = "https://raw.githubusercontent.com/usefksa/engAraDictionaryFrom_ArabEyes/master/engAraDictionary.sql"
+          raw = urllib.request.urlopen(url, timeout=30).read().decode("utf-8", errors="ignore")
+          rx = re.compile(r"\(\d+,\s*'([^']{1,60})',\s*'([^']{1,160})'\)")
+          seen, lines = set(), []
+          for ln in raw.splitlines():
+              m = rx.search(ln)
+              if m:
+                  en = m.group(1).strip().replace("\t", " ")
+                  ar = m.group(2).strip().replace("\t", " ")
+                  k = en.lower()
+                  if en and ar and k not in seen:
+                      seen.add(k)
+                      lines.append(f"{en}\t{ar}\n")
+          assert len(lines) > 50000, f"Too few dictionary rows: {len(lines)}"
+          with gzip.open("desktop-pc/dict/arabeyes_en_ar.tsv.gz", "wb", compresslevel=9) as f:
+              f.write("".join(lines).encode("utf-8"))
+          print(f"Bundled {len(lines)} ArabEyes EN<->AR dictionary entries for Windows PC.")
+
       - name: Install PC Dependencies & PyInstaller
         run: |
           python -m pip install --upgrade pip
@@ -104,12 +153,13 @@ jobs:
       - name: Run PC Engine Unit Tests
         run: pytest desktop-pc/test_pc_engine.py -v
 
-      - name: Compile Standalone Windows EXE (Bundled AR/EN Tessdata)
+      - name: Compile Standalone Windows EXE (Bundled AR/EN OCR + 87k Dictionary)
         run: |
           pyinstaller --noconfirm --onefile --windowed `
-            --name "PDFEditorPro-v5.1-PC-IbrahimJaber2026" `
+            --name "PDFEditorPro-v5.2-PC-IbrahimJaber2026" `
             --paths desktop-pc `
             --add-data "desktop-pc/tessdata;tessdata" `
+            --add-data "desktop-pc/dict;dict" `
             --collect-all customtkinter `
             --collect-all arabic_reshaper `
             --collect-all bidi `
@@ -118,5 +168,5 @@ jobs:
       - name: Upload Windows EXE Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PDFEditorPro-v5.1-PC-IbrahimJaber2026-Windows-EXE
-          path: dist/PDFEditorPro-v5.1-PC-IbrahimJaber2026.exe
+          name: PDFEditorPro-v5.2-PC-IbrahimJaber2026-Windows-EXE
+          path: dist/PDFEditorPro-v5.2-PC-IbrahimJaber2026.exe

@@ -36,19 +36,35 @@ data class ScannedPageItem(
     val enhancedImagePath: String,
     val filter: ScanFilter = ScanFilter.MAGIC_COLOR,
     val rotationDegrees: Int = 0,
-    val autoCropped: Boolean = true
+    val autoCropped: Boolean = false,
+    val cropLeft: Float = 0f,
+    val cropTop: Float = 0f,
+    val cropRight: Float = 1f,
+    val cropBottom: Float = 1f
 )
 
 /**
- * 100% Offline CamScanner Pro Image Enhancement & Document Export Engine.
+ * 100% Offline CamScanner Pro Image Enhancement & Document Export Engine (v5.2).
  * - Automatic EXIF orientation normalization (fixes sideways camera captures)
- * - Automatic document border detection & background trimming
- * - 5 Pro Document Filters (Magic Color, Crisp B&W Adaptive Threshold, Shadow Removal, Grayscale, Original)
- * - Multi-page A4 PDF assembly with optional embedded Offline Arabic + English OCR searchable text layer
+ * - Smooth bilinear-interpolated illumination shadow removal (zero blocky artifacts!)
+ * - True CamScanner Magic Color (shadow flattening + white-paper pop + vivid ink)
+ * - Crisp Adaptive B&W preserving Arabic diacritics & thin strokes
+ * - Manual precision crop + safe opt-in auto-trim + multi-page Searchable OCR PDF export
  *
  * Programmed by Ibrahim Jaber 2026 | برمجة إبراهيم جابر 2026
  */
 object CamScannerEngine {
+
+    /**
+     * Pure-Kotlin crop rect clamping helper (unit-testable without Android framework).
+     */
+    fun clampCropRect(left: Float, top: Float, right: Float, bottom: Float): FloatArray {
+        val l = left.coerceIn(0f, 0.45f)
+        val t = top.coerceIn(0f, 0.45f)
+        val r = right.coerceIn(l + 0.15f, 1f)
+        val b = bottom.coerceIn(t + 0.15f, 1f)
+        return floatArrayOf(l, t, r, b)
+    }
 
     /**
      * Loads a memory-safe bitmap scaled down to maxDimension pixels on the longest edge
@@ -87,73 +103,64 @@ object CamScannerEngine {
     }
 
     /**
-     * Detects the probable paper document rectangle inside a photo (normalized 0f..1f)
-     * by locating bright paper rows/columns vs darker desk/table margins.
+     * Conservative document margin detector: only trims obvious dark outer desk borders
+     * without ever chopping into document content.
      */
     fun detectDocumentBounds(bitmap: Bitmap): RectF {
         val w = bitmap.width
         val h = bitmap.height
-        if (w < 64 || h < 64) return RectF(0f, 0f, 1f, 1f)
+        if (w < 80 || h < 80) return RectF(0f, 0f, 1f, 1f)
 
-        val stepX = (w / 120).coerceAtLeast(1)
-        val stepY = (h / 120).coerceAtLeast(1)
-        val gridW = w / stepX
-        val gridH = h / stepY
+        val stepX = (w / 100).coerceAtLeast(1)
+        val stepY = (h / 100).coerceAtLeast(1)
+        val gw = w / stepX
+        val gh = h / stepY
 
-        val lum = IntArray(gridW * gridH)
-        var sum = 0L
-        for (gy in 0 until gridH) {
+        val rowBright = FloatArray(gh)
+        val colBright = FloatArray(gw)
+
+        for (gy in 0 until gh) {
             val py = (gy * stepY).coerceAtMost(h - 1)
-            for (gx in 0 until gridW) {
+            for (gx in 0 until gw) {
                 val px = (gx * stepX).coerceAtMost(w - 1)
                 val c = bitmap.getPixel(px, py)
-                val l = (Color.red(c) * 77 + Color.green(c) * 150 + Color.blue(c) * 29) shr 8
-                lum[gy * gridW + gx] = l
-                sum += l
+                val l = ((Color.red(c) * 77 + Color.green(c) * 150 + Color.blue(c) * 29) shr 8).toFloat()
+                rowBright[gy] += l / gw
+                colBright[gx] += l / gh
             }
         }
-        val meanLum = (sum / max(1, lum.size)).toInt()
-        val threshold = (meanLum * 0.85f).toInt().coerceIn(85, 195)
+        val centerBright = rowBright.slice((gh / 4)..(gh * 3 / 4)).average().toFloat()
+        val cutThresh = (centerBright * 0.62f).coerceIn(45f, 130f)
 
-        var minX = gridW
-        var maxX = 0
-        var minY = gridH
-        var maxY = 0
-        var paperCount = 0
+        var top = 0
+        while (top < gh / 4 && rowBright[top] < cutThresh) top++
+        var bottom = gh - 1
+        while (bottom > gh * 3 / 4 && rowBright[bottom] < cutThresh) bottom--
+        var left = 0
+        while (left < gw / 4 && colBright[left] < cutThresh) left++
+        var right = gw - 1
+        while (right > gw * 3 / 4 && colBright[right] < cutThresh) right--
 
-        for (gy in 0 until gridH) {
-            for (gx in 0 until gridW) {
-                if (lum[gy * gridW + gx] >= threshold) {
-                    if (gx < minX) minX = gx
-                    if (gx > maxX) maxX = gx
-                    if (gy < minY) minY = gy
-                    if (gy > maxY) maxY = gy
-                    paperCount++
-                }
-            }
-        }
-
-        // Only crop if the detected paper occupies a reasonable region (20%..94% of image)
-        if (paperCount < (gridW * gridH * 0.15)) return RectF(0f, 0f, 1f, 1f)
-        val left = (minX.toFloat() / gridW).coerceIn(0f, 0.30f)
-        val top = (minY.toFloat() / gridH).coerceIn(0f, 0.30f)
-        val right = ((maxX + 1).toFloat() / gridW).coerceIn(0.70f, 1f)
-        val bottom = ((maxY + 1).toFloat() / gridH).coerceIn(0.70f, 1f)
-
-        val areaRatio = (right - left) * (bottom - top)
-        return if (areaRatio in 0.25f..0.95f) RectF(left, top, right, bottom) else RectF(0f, 0f, 1f, 1f)
+        val nl = (left.toFloat() / gw).coerceIn(0f, 0.25f)
+        val nt = (top.toFloat() / gh).coerceIn(0f, 0.25f)
+        val nr = ((right + 1).toFloat() / gw).coerceIn(0.75f, 1f)
+        val nb = ((bottom + 1).toFloat() / gh).coerceIn(0.75f, 1f)
+        return RectF(nl, nt, nr, nb)
     }
 
     /**
-     * Applies CamScanner Pro filter pipeline (optional auto-crop, rotation, and filter enhancement)
-     * and writes the enhanced JPEG to outputFile.
+     * Processes a raw camera/gallery image with rotation, crop (manual or auto), and CamScanner filter.
      */
     suspend fun processScanPage(
         rawFilePath: String,
         outputFile: File,
         filter: ScanFilter = ScanFilter.MAGIC_COLOR,
-        autoCrop: Boolean = true,
-        rotationDegrees: Int = 0
+        autoCrop: Boolean = false,
+        rotationDegrees: Int = 0,
+        cropLeft: Float = 0f,
+        cropTop: Float = 0f,
+        cropRight: Float = 1f,
+        cropBottom: Float = 1f
     ): File = withContext(Dispatchers.IO) {
         val base = decodeScaledBitmap(rawFilePath, maxDimension = 1800)
             ?: throw IllegalStateException("Cannot decode scanned image: $rawFilePath")
@@ -169,25 +176,29 @@ object CamScannerEngine {
                 }
             }
 
-            if (autoCrop) {
-                val bounds = detectDocumentBounds(working)
-                val cx = (bounds.left * working.width).roundToInt().coerceIn(0, working.width - 10)
-                val cy = (bounds.top * working.height).roundToInt().coerceIn(0, working.height - 10)
-                val cw = ((bounds.width()) * working.width).roundToInt().coerceIn(10, working.width - cx)
-                val ch = ((bounds.height()) * working.height).roundToInt().coerceIn(10, working.height - cy)
-                if (cw < working.width - 12 || ch < working.height - 12) {
-                    val cropped = Bitmap.createBitmap(working, cx, cy, cw, ch)
-                    if (cropped !== working) {
-                        working.recycle()
-                        working = cropped
-                    }
+            val effRect = if (autoCrop) {
+                detectDocumentBounds(working)
+            } else {
+                val c = clampCropRect(cropLeft, cropTop, cropRight, cropBottom)
+                RectF(c[0], c[1], c[2], c[3])
+            }
+
+            val cx = (effRect.left * working.width).roundToInt().coerceIn(0, working.width - 16)
+            val cy = (effRect.top * working.height).roundToInt().coerceIn(0, working.height - 16)
+            val cw = (effRect.width() * working.width).roundToInt().coerceIn(16, working.width - cx)
+            val ch = (effRect.height() * working.height).roundToInt().coerceIn(16, working.height - cy)
+            if (cw < working.width - 8 || ch < working.height - 8) {
+                val cropped = Bitmap.createBitmap(working, cx, cy, cw, ch)
+                if (cropped !== working) {
+                    working.recycle()
+                    working = cropped
                 }
             }
 
             val filtered = applyFilter(working, filter)
             outputFile.parentFile?.mkdirs()
             FileOutputStream(outputFile).use { fos ->
-                filtered.compress(Bitmap.CompressFormat.JPEG, 90, fos)
+                filtered.compress(Bitmap.CompressFormat.JPEG, 92, fos)
             }
             if (filtered !== working) filtered.recycle()
         } finally {
@@ -197,7 +208,87 @@ object CamScannerEngine {
     }
 
     /**
-     * Fast pure-Kotlin pixel enhancement filters for document scanning.
+     * Smooth bilinear-interpolated illumination background normalizer (eliminates shadows with ZERO blocky squares!).
+     */
+    private fun smoothFlattenIllumination(pixels: IntArray, w: Int, h: Int) {
+        val grid = 16
+        val bgR = FloatArray((grid + 1) * (grid + 1))
+        val bgG = FloatArray((grid + 1) * (grid + 1))
+        val bgB = FloatArray((grid + 1) * (grid + 1))
+        val cellW = max(1, w / grid)
+        val cellH = max(1, h / grid)
+
+        // Sample 90th-percentile-like bright paper illumination at each grid vertex
+        for (gy in 0..grid) {
+            val yCenter = (gy * h / grid).coerceIn(0, h - 1)
+            val y0 = max(0, yCenter - cellH / 2)
+            val y1 = min(h, yCenter + cellH / 2 + 1)
+            for (gx in 0..grid) {
+                val xCenter = (gx * w / grid).coerceIn(0, w - 1)
+                val x0 = max(0, xCenter - cellW / 2)
+                val x1 = min(w, xCenter + cellW / 2 + 1)
+                var maxR = 75
+                var maxG = 75
+                var maxB = 75
+                var y = y0
+                while (y < y1) {
+                    var x = x0
+                    while (x < x1) {
+                        val c = pixels[y * w + x]
+                        val r = Color.red(c)
+                        val g = Color.green(c)
+                        val b = Color.blue(c)
+                        if (r > maxR) maxR = r
+                        if (g > maxG) maxG = g
+                        if (b > maxB) maxB = b
+                        x += 4
+                    }
+                    y += 4
+                }
+                val idx = gy * (grid + 1) + gx
+                bgR[idx] = maxR.toFloat()
+                bgG[idx] = maxG.toFloat()
+                bgB[idx] = maxB.toFloat()
+            }
+        }
+
+        // Bilinear interpolation per pixel -> silky-smooth shadow removal!
+        val stride = grid + 1
+        val invW = grid.toFloat() / max(1, w - 1)
+        val invH = grid.toFloat() / max(1, h - 1)
+        for (y in 0 until h) {
+            val fy = y * invH
+            val y0 = fy.toInt().coerceIn(0, grid - 1)
+            val dy = fy - y0
+            val wy0 = 1f - dy
+            val row0 = y0 * stride
+            val row1 = (y0 + 1) * stride
+            for (x in 0 until w) {
+                val fx = x * invW
+                val x0 = fx.toInt().coerceIn(0, grid - 1)
+                val dx = fx - x0
+                val wx0 = 1f - dx
+
+                val i00 = row0 + x0
+                val i10 = i00 + 1
+                val i01 = row1 + x0
+                val i11 = i01 + 1
+
+                val br = (bgR[i00] * wx0 + bgR[i10] * dx) * wy0 + (bgR[i01] * wx0 + bgR[i11] * dx) * dy
+                val bg = (bgG[i00] * wx0 + bgG[i10] * dx) * wy0 + (bgG[i01] * wx0 + bgG[i11] * dx) * dy
+                val bb = (bgB[i00] * wx0 + bgB[i10] * dx) * wy0 + (bgB[i01] * wx0 + bgB[i11] * dx) * dy
+
+                val c = pixels[y * w + x]
+                val nr = ((Color.red(c) / br) * 255f).roundToInt().coerceIn(0, 255)
+                val ng = ((Color.green(c) / bg) * 255f).roundToInt().coerceIn(0, 255)
+                val nb = ((Color.blue(c) / bb) * 255f).roundToInt().coerceIn(0, 255)
+                pixels[y * w + x] = Color.rgb(nr, ng, nb)
+            }
+        }
+    }
+
+    /**
+     * Fast pure-Kotlin CamScanner Pro pixel enhancement filters.
      */
     fun applyFilter(source: Bitmap, filter: ScanFilter): Bitmap {
         if (filter == ScanFilter.ORIGINAL) {
@@ -211,112 +302,53 @@ object CamScannerEngine {
 
         when (filter) {
             ScanFilter.GRAYSCALE -> {
+                smoothFlattenIllumination(pixels, w, h)
                 for (i in pixels.indices) {
                     val c = pixels[i]
                     val lum = (Color.red(c) * 77 + Color.green(c) * 150 + Color.blue(c) * 29) shr 8
-                    val boosted = (((lum - 128) * 1.28f) + 136f).roundToInt().coerceIn(0, 255)
+                    val boosted = (((lum - 128) * 1.25f) + 138f).roundToInt().coerceIn(0, 255)
                     pixels[i] = Color.rgb(boosted, boosted, boosted)
                 }
             }
 
-            ScanFilter.MAGIC_COLOR -> {
-                // Sample 95th percentile white-point & 5th percentile black-point for true CamScanner white-page pop
-                val hist = IntArray(256)
-                for (i in pixels.indices step 4) {
-                    val c = pixels[i]
-                    val lum = (Color.red(c) * 77 + Color.green(c) * 150 + Color.blue(c) * 29) shr 8
-                    hist[lum]++
-                }
-                val totalSamples = hist.sum().coerceAtLeast(1)
-                var acc = 0
-                var blackPt = 20
-                var whitePt = 230
-                for (v in 0..255) {
-                    acc += hist[v]
-                    if (acc >= totalSamples * 0.03f && blackPt == 20) blackPt = v
-                    if (acc >= totalSamples * 0.88f) {
-                        whitePt = v.coerceAtLeast(blackPt + 40)
-                        break
-                    }
-                }
-                val invSpan = 255f / (whitePt - blackPt).coerceAtLeast(1)
-
+            ScanFilter.SHADOW_REMOVE -> {
+                smoothFlattenIllumination(pixels, w, h)
                 for (i in pixels.indices) {
                     val c = pixels[i]
-                    var r = ((Color.red(c) - blackPt) * invSpan).roundToInt().coerceIn(0, 255)
-                    var g = ((Color.green(c) - blackPt) * invSpan).roundToInt().coerceIn(0, 255)
-                    var b = ((Color.blue(c) - blackPt) * invSpan).roundToInt().coerceIn(0, 255)
+                    val r = (((Color.red(c) - 128) * 1.12f) + 134f).roundToInt().coerceIn(0, 255)
+                    val g = (((Color.green(c) - 128) * 1.12f) + 134f).roundToInt().coerceIn(0, 255)
+                    val b = (((Color.blue(c) - 128) * 1.12f) + 134f).roundToInt().coerceIn(0, 255)
+                    pixels[i] = Color.rgb(r, g, b)
+                }
+            }
+
+            ScanFilter.MAGIC_COLOR -> {
+                // True CamScanner Magic Color: smooth shadow removal + pure-white background pop + rich ink contrast
+                smoothFlattenIllumination(pixels, w, h)
+                for (i in pixels.indices) {
+                    val c = pixels[i]
+                    var r = Color.red(c)
+                    var g = Color.green(c)
+                    var b = Color.blue(c)
                     val lum = (r * 77 + g * 150 + b * 29) shr 8
-                    if (lum > 205) {
-                        // Crisp white background whitening
-                        r = min(255, r + 18)
-                        g = min(255, g + 18)
-                        b = min(255, b + 18)
+                    if (lum > 212) {
+                        // Clean bright white paper background
+                        r = min(255, r + 32)
+                        g = min(255, g + 32)
+                        b = min(255, b + 32)
                     } else {
-                        // Vivid ink contrast boost
-                        r = (((r - 128) * 1.22f) + 124f).roundToInt().coerceIn(0, 255)
-                        g = (((g - 128) * 1.22f) + 124f).roundToInt().coerceIn(0, 255)
-                        b = (((b - 128) * 1.22f) + 124f).roundToInt().coerceIn(0, 255)
+                        // Deep, crisp ink & colorful stamps/headers
+                        r = (((r - 128) * 1.38f) + 120f).roundToInt().coerceIn(0, 255)
+                        g = (((g - 128) * 1.38f) + 120f).roundToInt().coerceIn(0, 255)
+                        b = (((b - 128) * 1.38f) + 120f).roundToInt().coerceIn(0, 255)
                     }
                     pixels[i] = Color.rgb(r, g, b)
                 }
             }
 
-            ScanFilter.SHADOW_REMOVE -> {
-                // Estimate local illumination background using a downsampled coarse grid and divide out shadows
-                val grid = 24
-                val cellW = max(1, w / grid)
-                val cellH = max(1, h / grid)
-                val bgR = FloatArray(grid * grid)
-                val bgG = FloatArray(grid * grid)
-                val bgB = FloatArray(grid * grid)
-
-                for (gy in 0 until grid) {
-                    val y0 = gy * cellH
-                    val y1 = min(h, y0 + cellH)
-                    for (gx in 0 until grid) {
-                        val x0 = gx * cellW
-                        val x1 = min(w, x0 + cellW)
-                        var maxR = 60
-                        var maxG = 60
-                        var maxB = 60
-                        var y = y0
-                        while (y < y1) {
-                            var x = x0
-                            while (x < x1) {
-                                val c = pixels[y * w + x]
-                                val r = Color.red(c)
-                                val g = Color.green(c)
-                                val b = Color.blue(c)
-                                if (r > maxR) maxR = r
-                                if (g > maxG) maxG = g
-                                if (b > maxB) maxB = b
-                                x += 4
-                            }
-                            y += 4
-                        }
-                        bgR[gy * grid + gx] = maxR.toFloat()
-                        bgG[gy * grid + gx] = maxG.toFloat()
-                        bgB[gy * grid + gx] = maxB.toFloat()
-                    }
-                }
-
-                for (y in 0 until h) {
-                    val gy = (y / cellH).coerceIn(0, grid - 1)
-                    for (x in 0 until w) {
-                        val gx = (x / cellW).coerceIn(0, grid - 1)
-                        val idx = gy * grid + gx
-                        val c = pixels[y * w + x]
-                        val nr = ((Color.red(c) / bgR[idx]) * 255f).roundToInt().coerceIn(0, 255)
-                        val ng = ((Color.green(c) / bgG[idx]) * 255f).roundToInt().coerceIn(0, 255)
-                        val nb = ((Color.blue(c) / bgB[idx]) * 255f).roundToInt().coerceIn(0, 255)
-                        pixels[y * w + x] = Color.rgb(nr, ng, nb)
-                    }
-                }
-            }
-
             ScanFilter.CRISP_BW -> {
-                // Integral-image adaptive local mean thresholding (razor-sharp white paper + black text)
+                // Smooth shadow normalization BEFORE adaptive thresholding preserves fine Arabic strokes & diacritics
+                smoothFlattenIllumination(pixels, w, h)
                 val lum = IntArray(w * h)
                 val integral = LongArray((w + 1) * (h + 1))
                 for (y in 0 until h) {
@@ -329,7 +361,7 @@ object CamScannerEngine {
                         integral[(y + 1) * (w + 1) + (x + 1)] = integral[y * (w + 1) + (x + 1)] + rowSum
                     }
                 }
-                val radius = (min(w, h) / 28).coerceIn(10, 32)
+                val radius = (min(w, h) / 30).coerceIn(10, 28)
                 for (y in 0 until h) {
                     val y1 = max(0, y - radius)
                     val y2 = min(h - 1, y + radius)
@@ -342,7 +374,8 @@ object CamScannerEngine {
                             integral[(y2 + 1) * (w + 1) + x1] +
                             integral[y1 * (w + 1) + x1]
                         val localMean = (sum / area).toInt()
-                        val v = if (lum[y * w + x] < localMean - 14) 0 else 255
+                        val pxLum = lum[y * w + x]
+                        val v = if (pxLum < localMean - 11 && pxLum < 210) 0 else 255
                         pixels[y * w + x] = Color.rgb(v, v, v)
                     }
                 }
@@ -380,7 +413,7 @@ object CamScannerEngine {
                     val pdPage = PDPage(pageRect)
                     doc.addPage(pdPage)
 
-                    val pdImg = JPEGFactory.createFromImage(doc, bmp, 0.88f)
+                    val pdImg = JPEGFactory.createFromImage(doc, bmp, 0.90f)
                     val margin = 12f
                     val availW = pageRect.width - margin * 2
                     val availH = pageRect.height - margin * 2
